@@ -79,6 +79,7 @@
   }
   input[type=number],input[type=time],input[type=datetime-local]{font-family:var(--mono);}
   textarea{min-height:56px;resize:vertical;}
+  input[readonly]{background:var(--teal-soft);color:var(--ink-2);font-weight:700;}
   .checkline{display:flex;align-items:flex-start;gap:9px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
   .checkline input{margin-top:3px;width:18px;height:18px;flex-shrink:0;}
   .warn-banner{background:var(--due-soft);color:var(--due);border-radius:8px;padding:9px 12px;font-size:12.5px;margin-bottom:12px;font-weight:600;}
@@ -259,7 +260,7 @@ async function dbDelete(store,key){ const d=await db(); return new Promise((res,
    ============================================================ */
 const WIZARD = [
   { id:'ids', title:'Study Identifiers', fields:[
-    {key:'studyId',label:'Study ID',type:'text',required:true},
+    {key:'studyId',label:'Study ID (auto-generated)',type:'text',required:true,readonly:true},
     {key:'mrdNo',label:'MRD / Hospital No.',type:'text'},
     {key:'randEnvNo',label:'Randomization Envelope (SNOSE) No.',type:'text'},
     {key:'randOpenedAt',label:'Date/Time Envelope Opened',type:'datetime-local'},
@@ -276,11 +277,10 @@ const WIZARD = [
     {key:'consentNoReason',label:'If No, Reason',type:'text',cond:{k:'consentObtained',v:'No'}},
     {key:'pregTest',label:'Urine Pregnancy Test',type:'select',options:['Neg','Pos','NA']},
     {key:'witness',label:'Witness Name/Phone',type:'text'},
-    {key:'translator',label:'Translator',type:'text'},
   ]},
   { id:'eligibility', title:'Eligibility Checklist', custom:'eligibility' },
   { id:'sting', title:'Sting & Baseline Clinical Data', fields:[
-    {key:'stingAt',label:'Date/Time of Sting',type:'datetime-local'},
+    {key:'stingAt',label:'Date/Time of Sting',type:'datetime-local',required:true},
     {key:'timeSinceSting',label:'Time Since Sting (h:mm)',type:'text'},
     {key:'stingLocation',label:'Location (village/district)',type:'text'},
     {key:'stingSite',label:'Sting Site',type:'select',options:['Finger','Other Toe','Great Toe','Hand','Foot','Forearm','Arm','Leg','Thigh','Trunk','Other']},
@@ -301,7 +301,7 @@ const WIZARD = [
     {key:'rr',label:'RR (/min)',type:'number'},
     {key:'spo2',label:'SpO\u2082 (%)',type:'number'},
     {key:'temp',label:'Temp (\u00b0C)',type:'number'},
-    {key:'painNRS',label:'Pain NRS (0-10)',type:'number',required:true},
+    {key:'painNRS',label:'Pain NRS (0-10)',type:'number',required:true,min:5},
     {key:'avpu',label:'AVPU',type:'select',options:['A','V','P','U']},
     {key:'localExam',label:'Local Exam (erythema/swelling)',type:'select',options:['None','Mild','Mod','Severe']},
     {key:'localExamNotes',label:'Local Exam Notes',type:'text'},
@@ -310,24 +310,18 @@ const WIZARD = [
     {key:'qrs',label:'QRS (ms)',type:'number'},
     {key:'ecgComments',label:'ECG Comments',type:'text'},
   ]},
-  { id:'random', title:'Randomization / Blinding', fields:[
-    {key:'preparedBy',label:'Prepared By (name/sign)',type:'text'},
-    {key:'syringeLabelId',label:'Study Syringe Label ID',type:'text'},
-    {key:'blindingMaintained',label:'Blinding Maintained',type:'select',options:['Yes','No']},
-    {key:'unblindingAtBaseline',label:'Any Unblinding at Baseline?',type:'select',options:['No','Yes']},
-    {key:'unblindingReason',label:'Unblinding Reason',type:'text',cond:{k:'unblindingAtBaseline',v:'Yes'}},
-  ]},
-  { id:'intervention', title:'Intervention Details (T0)', fields:[
-    {key:'t0At',label:'Date/Time of Injection (T0)',type:'datetime-local',required:true},
-    {key:'technique',label:'Technique',type:'select',options:['Ring block (non-digit)','Digital ring block (finger)','Tumescent finger block','Great toe 3-sided block','Toe digital block (non-great toe)']},
-    {key:'aspiration',label:'Aspiration Prior to Injection',type:'select',options:['Performed','Not done']},
-    {key:'aspirationReason',label:'Reason Not Done',type:'text',cond:{k:'aspiration',v:'Not done'}},
-    {key:'totalVolume',label:'Total Volume Injected (mL)',type:'number'},
-    {key:'needleGauge',label:'Needle Gauge',type:'select',options:['24G','Other']},
-    {key:'needleGaugeOther',label:'Needle Gauge (Other)',type:'text',cond:{k:'needleGauge',v:'Other'}},
-    {key:'immediateIssues',label:'Immediate Issues',type:'select',options:['None','Difficult infiltration','Vascular puncture','Other']},
-    {key:'immediateIssuesOther',label:'Issues (Other)',type:'text',cond:{k:'immediateIssues',v:'Other'}},
-  ]},
+];
+
+const INTERVENTION_FIELDS=[
+  {key:'t0At',label:'Date/Time of Injection (T0)',type:'datetime-local',required:true},
+  {key:'technique',label:'Technique',type:'select',options:['Ring block (non-digit)','Digital ring block (finger)','Tumescent finger block','Great toe 3-sided block','Toe digital block (non-great toe)']},
+  {key:'aspiration',label:'Aspiration Prior to Injection',type:'select',options:['Performed','Not done']},
+  {key:'aspirationReason',label:'Reason Not Done',type:'text',cond:{k:'aspiration',v:'Not done'}},
+  {key:'totalVolume',label:'Total Volume Injected (mL)',type:'number'},
+  {key:'needleGauge',label:'Needle Gauge',type:'select',options:['24G','Other']},
+  {key:'needleGaugeOther',label:'Needle Gauge (Other)',type:'text',cond:{k:'needleGauge',v:'Other'}},
+  {key:'immediateIssues',label:'Immediate Issues',type:'select',options:['None','Difficult infiltration','Vascular puncture','Other']},
+  {key:'immediateIssuesOther',label:'Issues (Other)',type:'text',cond:{k:'immediateIssues',v:'Other'}},
 ];
 
 const NRS_TIMEPOINTS=[{k:'15',min:15},{k:'30',min:30},{k:'60',min:60},{k:'90',min:90},{k:'120',min:120},{k:'150',min:150},{k:'180',min:180},{k:'210',min:210},{k:'240',min:240},{k:'270',min:270},{k:'300',min:300},{k:'330',min:330},{k:'360',min:360},{k:'8h',min:480},{k:'10h',min:600},{k:'12h',min:720},{k:'24h',min:1440}];
@@ -355,9 +349,17 @@ const EXCLUSION=[
 const state={ view:'home', records:[], recordId:null, wizardStep:0, tab:'overview', settings:{} };
 let saveTimer=null;
 
+function generateStudyId(){
+  const year=new Date().getFullYear();
+  const existingNums=state.records
+    .map(r=>{ const m=/JIP-EM-(\d{4})-(\d{3})/.exec(r.id||''); return (m && +m[1]===year) ? +m[2] : 0; })
+    .filter(n=>n>0);
+  const next=(existingNums.length? Math.max(...existingNums):0)+1;
+  return `JIP-EM-${year}-${next.toString().padStart(3,'0')}`;
+}
 function newRecordSkeleton(){
-  const n=(state.records.length+1).toString().padStart(3,'0');
-  return { id:'JIP-'+n+'-'+Date.now().toString().slice(-4), createdAt:Date.now(), updatedAt:Date.now(), synced:false,
+  const id=generateStudyId();
+  return { id, studyId:id, createdAt:Date.now(), updatedAt:Date.now(), synced:false,
     inclusion:{}, exclusion:{}, nrs:{}, vitals:{}, rescues:[], followup:{t12:{},t24:{}} };
 }
 
@@ -466,7 +468,7 @@ function fieldHTML(f, rec){
   } else if(f.type==='textarea'){
     input=`<textarea data-key="${f.key}">${val}</textarea>`;
   } else {
-    input=`<input type="${f.type}" data-key="${f.key}" value="${val}">`;
+    input=`<input type="${f.type}" data-key="${f.key}" value="${val}" ${f.readonly?'readonly':''}>`;
   }
   return `<div class="field ${hidden?'hidden':''}" id="wrap-${f.key}" ${f.cond?`data-cond-key="${f.cond.k}" data-cond-val="${f.cond.v}"`:''}>
     <label>${f.label}${f.required?' <span class="req">*</span>':''}</label>${input}
@@ -509,7 +511,7 @@ function renderWizard(){
     const anyExc=Object.values(rec.exclusion).some(Boolean);
     const allInc=INCLUSION.every(c=>rec.inclusion[c.key]);
     if(anyExc || !allInc){
-      body=`<div class="warn-banner">${anyExc?'An exclusion criterion is checked \u2014 confirm this participant should still be enrolled.':'Not all inclusion criteria are confirmed yet.'}</div>`+body;
+      body=`<div class="warn-banner">${anyExc?'An exclusion criterion is checked \u2014 this participant is not eligible. Uncheck it to proceed, or exit and do not enroll.':'Not all inclusion criteria are confirmed yet.'}</div>`+body;
     }
   } else {
     body=step.fields.map(f=>fieldHTML(f,rec)).join('');
@@ -542,10 +544,20 @@ function attachHandlers(){
 
 function validateStep(){
   const rec=getCurrentRecord(); const step=WIZARD[state.wizardStep];
+  if(step.custom==='eligibility'){
+    const anyExc=EXCLUSION.some(c=>rec.exclusion[c.key]);
+    if(anyExc){ showToast('Cannot proceed: an exclusion criterion is checked'); return false; }
+    const allInc=INCLUSION.every(c=>rec.inclusion[c.key]);
+    if(!allInc){ showToast('Cannot proceed: all inclusion criteria must be checked'); return false; }
+    return true;
+  }
   if(!step.fields) return true;
   for(const f of step.fields){
     if(f.required && f.cond && rec[f.cond.k]!==f.cond.v) continue;
     if(f.required && !rec[f.key]){ showToast('Please fill: '+f.label); return false; }
+    if(f.min!==undefined && rec[f.key]!=='' && rec[f.key]!==undefined && +rec[f.key] < f.min){
+      showToast(f.label+' must be \u2265 '+f.min); return false;
+    }
   }
   return true;
 }
@@ -556,12 +568,13 @@ function wizardFinish(){ if(!validateStep()) return; showToast('Enrollment saved
 /* ============================================================
    RECORD DETAIL (post-enrollment tabs)
    ============================================================ */
-const TABS=[['overview','Overview'],['pain','Pain (NRS)'],['rescue','Rescue'],['vitals','Vitals'],['followup','Follow-up']];
+const TABS=[['overview','Overview'],['intervention','Intervention'],['pain','Pain (NRS)'],['rescue','Rescue'],['vitals','Vitals'],['followup','Follow-up']];
 
 function renderRecord(){
   const rec=getCurrentRecord(); if(!rec) return '<div class="empty">Record not found.</div>';
   let html=`<div class="tabs">${TABS.map(([id,label])=>`<div class="tab ${state.tab===id?'active':''}" onclick="setTab('${id}')">${label}</div>`).join('')}</div>`;
   if(state.tab==='overview') html+=renderOverviewTab(rec);
+  else if(state.tab==='intervention') html+=renderInterventionTab(rec);
   else if(state.tab==='pain') html+=renderPainTab(rec);
   else if(state.tab==='rescue') html+=renderRescueTab(rec);
   else if(state.tab==='vitals') html+=renderVitalsTab(rec);
@@ -590,6 +603,16 @@ function editEnrollment(){ state.view='wizard'; state.wizardStep=0; render(); }
 async function deleteRecord(id){
   if(!confirm('Delete record '+id+'? This cannot be undone.')) return;
   await dbDelete('records',id); await loadAll(); goHome();
+}
+
+function renderInterventionTab(rec){
+  const done=INTERVENTION_FIELDS.every(f=>{
+    if(f.cond && rec[f.cond.k]!==f.cond.v) return true;
+    return !f.required || rec[f.key];
+  });
+  const badge=rec.t0At ? `<span class="badge synced">T0 recorded</span>` : `<span class="badge pending">Not yet given</span>`;
+  return `<div style="margin-bottom:12px;">${badge}</div>
+    <div id="intervention-body">${INTERVENTION_FIELDS.map(f=>fieldHTML(f,rec)).join('')}</div>`;
 }
 
 function renderPainTab(rec){
@@ -669,7 +692,10 @@ function renderFollowupTab(rec){
 
 function attachRecordTabHandlers(rec){
   const main=document.querySelector('main');
+  const interventionBody=document.getElementById('intervention-body');
+  if(interventionBody){ bindGenericFields(interventionBody, rec); }
   main.querySelectorAll('[data-key]').forEach(el=>{
+    if(interventionBody && interventionBody.contains(el)) return; // already bound above
     el.addEventListener('input',()=>{ rec[el.dataset.key]=el.value; scheduleSave(rec); });
   });
   main.querySelectorAll('[data-nrs]').forEach(el=>{
@@ -754,6 +780,7 @@ function downloadXlsx(sheets, filename){
 function buildSheetsFor(records){
   const flatCols=[];
   WIZARD.forEach(s=>{ if(s.fields) s.fields.forEach(f=>flatCols.push(f.key)); });
+  INTERVENTION_FIELDS.forEach(f=>flatCols.push(f.key));
   const recordsRows=[ ['StudyID', ...flatCols, ...INCLUSION.map(c=>'INC_'+c.key), ...EXCLUSION.map(c=>'EXC_'+c.key), 'OnsetReliefMin','TriggerMet','TriggerTime','Synced'] ];
   const nrsRows=[['StudyID','Timepoint','NRS']];
   const rescueRows=[['StudyID','RescueNum','DateTime','Drug','Dose','Route','ResponseNRS','Notes']];
