@@ -80,6 +80,14 @@
   input[type=number],input[type=time],input[type=datetime-local]{font-family:var(--mono);}
   textarea{min-height:56px;resize:vertical;}
   input[readonly]{background:var(--teal-soft);color:var(--ink-2);font-weight:700;}
+  .grid-table input:disabled,.grid-table select:disabled{background:#EDEEEC;color:#A3ABA8;cursor:not-allowed;}
+  input.out-of-range,select.out-of-range{border-color:var(--due) !important;background:var(--due-soft) !important;}
+  .vitals-entry-btn{width:100%;text-align:left;padding:8px 6px;font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:6px;color:var(--text);min-height:34px;}
+  .vitals-entry-btn:disabled{background:#EDEEEC;color:#A3ABA8;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(10,20,19,.5);display:flex;align-items:flex-end;justify-content:center;z-index:60;}
+  .modal-card{background:var(--bg);width:100%;max-width:480px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));}
+  .modal-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;}
+  .modal-footer{margin-top:6px;}
   .checkline{display:flex;align-items:flex-start;gap:9px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
   .checkline input{margin-top:3px;width:18px;height:18px;flex-shrink:0;}
   .warn-banner{background:var(--due-soft);color:var(--due);border-radius:8px;padding:9px 12px;font-size:12.5px;margin-bottom:12px;font-weight:600;}
@@ -101,7 +109,8 @@
   .grid-table th{font-size:10px;text-transform:uppercase;color:var(--text-dim);padding:4px 3px;text-align:left;}
   .grid-table td{padding:3px 2px;vertical-align:middle;}
   .grid-table input,.grid-table select{padding:6px 4px;font-size:12.5px;font-family:var(--mono);}
-  .grid-table tr.due td{background:var(--due-soft);}
+  .grid-table tr.due td{background:#F7EEDA;}
+  .grid-table tr.overdue td{background:var(--due-soft);}
   .grid-table tr.done td{background:var(--ok-soft);}
   .tp-label{font-family:var(--mono);font-weight:700;white-space:nowrap;}
   .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
@@ -258,8 +267,54 @@ async function dbDelete(store,key){ const d=await db(); return new Promise((res,
 /* ============================================================
    FIELD CONFIG
    ============================================================ */
+function computeTimeSinceSting(rec){
+  if(!rec.stingAt || !rec.screenAt) return '';
+  const ms=new Date(rec.screenAt)-new Date(rec.stingAt);
+  if(isNaN(ms) || ms<0) return '';
+  const totalMin=Math.round(ms/60000);
+  return Math.floor(totalMin/60)+':'+String(totalMin%60).padStart(2,'0');
+}
+function timeSinceStingMinutes(rec){
+  const v=computeTimeSinceSting(rec); if(!v) return null;
+  const [h,m]=v.split(':').map(Number); return h*60+m;
+}
+function computeMAP(rec){
+  if(rec.sbp==='' || rec.sbp===undefined || rec.dbp==='' || rec.dbp===undefined) return '';
+  const sbp=+rec.sbp, dbp=+rec.dbp;
+  if(isNaN(sbp) || isNaN(dbp)) return '';
+  return Math.round(dbp + (sbp-dbp)/3);
+}
+function computePrimaryEndpoint(rec){
+  if(!rec.t0At) return null;
+  let best=null, source=null;
+  (rec.rescues||[]).forEach(r=>{
+    if(r && r.dateTime){
+      const min=Math.round((new Date(r.dateTime)-new Date(rec.t0At))/60000);
+      if(!isNaN(min) && (best===null || min<best)){ best=min; source='First rescue dose'; }
+    }
+  });
+  UNIFIED_TIMEPOINTS.forEach(tp=>{
+    if(!tp.nrsKey || tp.min<=30) return;
+    const v=rec.nrs[tp.nrsKey];
+    if(v!==undefined && v!=='' && +v>=4){
+      if(best===null || tp.min<best){ best=tp.min; source='NRS \u22654 at T+'+fmtTimeLabel(tp.min); }
+    }
+  });
+  return best===null ? null : { minutes:best, source };
+}
+function elapsedSinceT0(rec){
+  if(!rec.t0At) return null;
+  const min=Math.round((Date.now()-new Date(rec.t0At).getTime())/60000);
+  if(min<0) return null;
+  return Math.floor(min/60)+'h '+(min%60)+'m';
+}
+
 const WIZARD = [
-  { id:'ids', title:'Study Identifiers', fields:[
+  { id:'ids', title:'Study Identifiers', warnIf:(rec)=>{
+      if(!rec.mobile) return null;
+      const dup=state.records.find(r=>r.id!==rec.id && r.mobile && r.mobile===rec.mobile);
+      return dup ? `Possible duplicate: mobile number matches existing record ${dup.id}.` : null;
+    }, fields:[
     {key:'studyId',label:'Study ID (auto-generated)',type:'text',required:true,readonly:true},
     {key:'mrdNo',label:'MRD / Hospital No.',type:'text'},
     {key:'randEnvNo',label:'Randomization Envelope (SNOSE) No.',type:'text'},
@@ -275,13 +330,16 @@ const WIZARD = [
     {key:'screenAt',label:'Date/Time of Screening',type:'datetime-local'},
     {key:'consentObtained',label:'Informed Consent Obtained',type:'select',options:['Yes','No'],required:true},
     {key:'consentNoReason',label:'If No, Reason',type:'text',cond:{k:'consentObtained',v:'No'}},
-    {key:'pregTest',label:'Urine Pregnancy Test',type:'select',options:['Neg','Pos','NA']},
+    {key:'pregTest',label:'Urine Pregnancy Test',type:'select',options:['Neg','Pos','NA'],cond:{k:'sex',v:'Female'}},
     {key:'witness',label:'Witness Name/Phone',type:'text'},
   ]},
   { id:'eligibility', title:'Eligibility Checklist', custom:'eligibility' },
-  { id:'sting', title:'Sting & Baseline Clinical Data', fields:[
+  { id:'sting', title:'Sting & Baseline Clinical Data', warnIf:(rec)=>{
+      const min=timeSinceStingMinutes(rec);
+      return (min!==null && min>360) ? 'Time since sting exceeds 6 hours \u2014 this contradicts the inclusion criterion.' : null;
+    }, fields:[
     {key:'stingAt',label:'Date/Time of Sting',type:'datetime-local',required:true},
-    {key:'timeSinceSting',label:'Time Since Sting (h:mm)',type:'text'},
+    {key:'timeSinceSting',label:'Time Since Sting (h:mm, auto)',type:'text',computed:true,compute:computeTimeSinceSting},
     {key:'stingLocation',label:'Location (village/district)',type:'text'},
     {key:'stingSite',label:'Sting Site',type:'select',options:['Finger','Other Toe','Great Toe','Hand','Foot','Forearm','Arm','Leg','Thigh','Trunk','Other']},
     {key:'stingSiteOther',label:'Sting Site (Other)',type:'text',cond:{k:'stingSite',v:'Other'}},
@@ -292,15 +350,20 @@ const WIZARD = [
     {key:'currentMeds',label:'Current Medications',type:'textarea'},
     {key:'allergies',label:'Allergies',type:'textarea'},
   ]},
-  { id:'baseline', title:'Baseline Vitals & Exam', fields:[
+  { id:'baseline', title:'Baseline Vitals & Exam', warnIf:(rec)=>{
+      if(!rec.qtc) return null;
+      const qtc=+rec.qtc; if(isNaN(qtc)) return null;
+      const threshold = rec.sex==='Male' ? 450 : 470;
+      return qtc>=threshold ? `QTc ${qtc}ms is at/above the prolongation threshold (${threshold}ms) \u2014 chloroquine carries QT risk; review before enrolling.` : null;
+    }, fields:[
     {key:'baselineAt',label:'Date/Time (T-0 baseline)',type:'datetime-local'},
-    {key:'hr',label:'HR (bpm)',type:'number'},
-    {key:'sbp',label:'SBP (mmHg)',type:'number'},
-    {key:'dbp',label:'DBP (mmHg)',type:'number'},
-    {key:'map',label:'MAP',type:'number'},
-    {key:'rr',label:'RR (/min)',type:'number'},
-    {key:'spo2',label:'SpO\u2082 (%)',type:'number'},
-    {key:'temp',label:'Temp (\u00b0C)',type:'number'},
+    {key:'hr',label:'HR (bpm)',type:'number',range:[30,200]},
+    {key:'sbp',label:'SBP (mmHg)',type:'number',range:[60,250]},
+    {key:'dbp',label:'DBP (mmHg)',type:'number',range:[30,150]},
+    {key:'map',label:'MAP (auto)',type:'number',computed:true,compute:computeMAP},
+    {key:'rr',label:'RR (/min)',type:'number',range:[6,60]},
+    {key:'spo2',label:'SpO\u2082 (%)',type:'number',range:[50,100]},
+    {key:'temp',label:'Temp (\u00b0C)',type:'number',range:[30,42]},
     {key:'painNRS',label:'Pain NRS (0-10)',type:'number',required:true,min:5},
     {key:'avpu',label:'AVPU',type:'select',options:['A','V','P','U']},
     {key:'localExam',label:'Local Exam (erythema/swelling)',type:'select',options:['None','Mild','Mod','Severe']},
@@ -327,6 +390,21 @@ const INTERVENTION_FIELDS=[
 const NRS_TIMEPOINTS=[{k:'15',min:15},{k:'30',min:30},{k:'60',min:60},{k:'90',min:90},{k:'120',min:120},{k:'150',min:150},{k:'180',min:180},{k:'210',min:210},{k:'240',min:240},{k:'270',min:270},{k:'300',min:300},{k:'330',min:330},{k:'360',min:360},{k:'8h',min:480},{k:'10h',min:600},{k:'12h',min:720},{k:'24h',min:1440}];
 const VITALS_TIMEPOINTS=[0,30,60,90,120,150,180,210,240,270,300,330,360,390,420,450,480];
 const RESCUE_DRUGS=['Paracetamol 1g IV','Tramadol 50-100mg IV','Fentanyl mcg IV','Ketorolac mg IV','Other'];
+const THESIS_TARGET=80;
+
+// One merged, time-ordered schedule combining NRS + Vitals + the 12h/24h follow-up
+// calls, so all monitoring lives in a single timeline instead of three tabs.
+const UNIFIED_TIMEPOINTS=(function(){
+  const map=new Map();
+  NRS_TIMEPOINTS.forEach(tp=>{ map.set(tp.min,{min:tp.min,nrsKey:tp.k,vitals:false,followup:(tp.min===720||tp.min===1440)}); });
+  VITALS_TIMEPOINTS.forEach(min=>{
+    if(min===0) return; // T+0 vitals are captured on the Intervention tab instead
+    if(map.has(min)) map.get(min).vitals=true;
+    else map.set(min,{min,nrsKey:null,vitals:true,followup:false});
+  });
+  return Array.from(map.values()).sort((a,b)=>a.min-b.min);
+})();
+function fmtTimeLabel(min){ return min<480 ? (min+'m') : ((min/60)+'h'); }
 
 const INCLUSION=[
   {key:'age18to60',label:'Age \u226518 and \u226460 years'},
@@ -346,7 +424,7 @@ const EXCLUSION=[
 /* ============================================================
    APP STATE
    ============================================================ */
-const state={ view:'home', records:[], recordId:null, wizardStep:0, tab:'overview', settings:{} };
+const state={ view:'home', records:[], recordId:null, wizardStep:0, tab:'overview', settings:{}, vitalsModalMin:null };
 let saveTimer=null;
 
 function generateStudyId(){
@@ -375,7 +453,7 @@ function scheduleSave(rec){
 }
 
 async function loadAll(){ state.records=(await dbGetAll('records')).sort((a,b)=>b.updatedAt-a.updatedAt); }
-async function loadSettings(){ state.settings=(await dbGet('settings','app'))||{key:'app',syncUrl:'',lastSync:null}; }
+async function loadSettings(){ state.settings=(await dbGet('settings','app'))||{key:'app',syncUrl:'',lastSync:null,remindersEnabled:false}; }
 
 /* ============================================================
    RENDER: ROOT
@@ -420,15 +498,44 @@ function renderHome(){
     <button class="btn primary" onclick="exportAll()">Export All to Excel</button>
     <button class="btn" onclick="syncAll()">Sync Now</button>
   </div>`;
+  const total0=state.records.length;
+  const pct0=Math.min(100, Math.round(100*total0/THESIS_TARGET));
+  html+=`<div class="settings-item">
+    <div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:6px;">
+      <span>Thesis Enrollment Progress</span><span>${total0} / ${THESIS_TARGET} (${pct0}%)</span>
+    </div>
+    <div style="background:var(--line);border-radius:99px;height:10px;overflow:hidden;">
+      <div style="background:var(--teal);height:100%;width:${pct0}%;"></div>
+    </div>
+    ${total0<THESIS_TARGET ? `<div class="hint" style="margin-top:6px;">${THESIS_TARGET-total0} more to reach target</div>` : `<div class="hint" style="margin-top:6px;">Target reached</div>`}
+  </div>`;
+  if(state.records.length){
+    const total=state.records.length;
+    const intakeComplete=state.records.filter(r=>recordCompleteness(r)===100).length;
+    const pendingFollowup=state.records.filter(r=>{
+      const f=r.followup||{};
+      return !(f.t12 && f.t12.dateTime) || !(f.t24 && f.t24.dateTime);
+    }).length;
+    html+=`<div class="settings-item" style="display:flex;justify-content:space-around;text-align:center;">
+      <div><div style="font-size:20px;font-weight:700;">${total}</div><div class="hint">Enrolled</div></div>
+      <div><div style="font-size:20px;font-weight:700;">${intakeComplete}/${total}</div><div class="hint">Intake complete</div></div>
+      <div><div style="font-size:20px;font-weight:700;">${pendingFollowup}</div><div class="hint">Pending follow-up</div></div>
+    </div>`;
+  }
   if(!state.records.length){
     html+=`<div class="empty">No records yet.<br>Tap <b>+ New Enrollment</b> to start your first CRF.</div>`;
   } else {
+    html+=`<input type="text" id="homeSearch" placeholder="Search by Study ID, technique, sync status..." oninput="filterHome()" style="margin-bottom:12px;">`;
     for(const r of state.records){
       const pct=recordCompleteness(r);
-      html+=`<div class="record-card" onclick="openRecord('${r.id}')">
+      const searchBlob=`${r.id} ${r.technique||''} ${r.synced?'synced':'not synced pending'} ${r.sex||''}`.toLowerCase();
+      html+=`<div class="record-card" data-search="${searchBlob}" onclick="openRecord('${r.id}')">
         <div class="row1">
           <span class="sid">${r.id}</span>
-          <span class="badge ${r.synced?'synced':'pending'}">${r.synced?'SYNCED':'NOT SYNCED'}</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span class="badge ${r.synced?'synced':'pending'}">${r.synced?'SYNCED':'NOT SYNCED'}</span>
+            <button class="icon-btn" style="color:var(--due);font-size:16px;padding:2px 4px;" onclick="event.stopPropagation();deleteRecord('${r.id}')">\u2715</button>
+          </span>
         </div>
         <div class="meta">${r.age?('Age '+r.age+', '):''}${r.sex||''} \u00b7 ${r.technique||'Technique not set'} \u00b7 ${pct}% complete</div>
       </div>`;
@@ -450,7 +557,21 @@ async function startNewRecord(){
   state.recordId=rec.id; state.view='wizard'; state.wizardStep=0;
   render();
 }
-function openRecord(id){ state.recordId=id; state.view='record'; state.tab='overview'; render(); }
+function defaultTabFor(rec){ return rec && rec.t0At ? 'timeline' : 'intervention'; }
+function openRecord(id){
+  state.recordId=id;
+  state.view='record';
+  const rec=state.records.find(r=>r.id===id);
+  state.tab=defaultTabFor(rec);
+  state.vitalsModalMin=null;
+  render();
+}
+function filterHome(){
+  const q=(document.getElementById('homeSearch').value||'').toLowerCase().trim();
+  document.querySelectorAll('.record-card').forEach(el=>{
+    el.style.display = (!q || (el.dataset.search||'').includes(q)) ? '' : 'none';
+  });
+}
 function goHome(){ state.view='home'; loadAll().then(render); }
 function goSettings(){ state.view='settings'; render(); }
 
@@ -460,29 +581,65 @@ function getCurrentRecord(){ return state.records.find(r=>r.id===state.recordId)
    GENERIC FIELD RENDERING
    ============================================================ */
 function fieldHTML(f, rec){
-  const val = rec[f.key] ?? '';
+  let val;
+  if(f.computed){ val=f.compute(rec) ?? ''; rec[f.key]=val; }
+  else val = rec[f.key] ?? '';
   const hidden = f.cond && rec[f.cond.k]!==f.cond.v;
   let input='';
   if(f.type==='select'){
     input=`<select data-key="${f.key}"><option value=""></option>${f.options.map(o=>`<option value="${o}" ${o===val?'selected':''}>${o}</option>`).join('')}</select>`;
   } else if(f.type==='textarea'){
     input=`<textarea data-key="${f.key}">${val}</textarea>`;
+  } else if(f.computed){
+    input=`<input type="${f.type}" id="comp-${f.key}" value="${val}" readonly>`;
   } else {
-    input=`<input type="${f.type}" data-key="${f.key}" value="${val}" ${f.readonly?'readonly':''}>`;
+    const tag=`<input type="${f.type}" data-key="${f.key}" value="${val}" ${f.readonly?'readonly':''}>`;
+    input = (!f.readonly && (f.type==='datetime-local'||f.type==='time'))
+      ? `<div style="display:flex;gap:6px;">${tag}<button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div>`
+      : tag;
   }
   return `<div class="field ${hidden?'hidden':''}" id="wrap-${f.key}" ${f.cond?`data-cond-key="${f.cond.k}" data-cond-val="${f.cond.v}"`:''}>
     <label>${f.label}${f.required?' <span class="req">*</span>':''}</label>${input}
   </div>`;
 }
+function setNowSibling(btn){
+  const input=btn.previousElementSibling;
+  const d=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  input.value = (input.type==='time')
+    ? pad(d.getHours())+':'+pad(d.getMinutes())
+    : d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
+  input.dispatchEvent(new Event('input',{bubbles:true}));
+}
 
-function bindGenericFields(container, rec){
+const RANGES={hr:[30,200],sbp:[60,250],dbp:[30,150],rr:[6,60],spo2:[50,100],temp:[30,42]};
+function applyRangeCheck(el, range){
+  const v=+el.value;
+  const bad = el.value!=='' && !isNaN(v) && (v<range[0]||v>range[1]);
+  el.classList.toggle('out-of-range', bad);
+}
+
+function bindGenericFields(container, rec, fieldsList){
   container.querySelectorAll('[data-key]').forEach(el=>{
+    const f = fieldsList && fieldsList.find(x=>x.key===el.dataset.key);
+    if(f && f.range) applyRangeCheck(el, f.range);
     el.addEventListener(el.tagName==='SELECT'?'change':'input', ()=>{
       rec[el.dataset.key]=el.value;
       scheduleSave(rec);
       if(el.tagName==='SELECT') updateConditionals(container, rec);
+      if(fieldsList) refreshComputedFields(container, fieldsList, rec);
+      if(f && f.range) applyRangeCheck(el, f.range);
     });
   });
+}
+function refreshComputedFields(container, fieldsList, rec){
+  fieldsList.forEach(f=>{
+    if(!f.computed) return;
+    const val=f.compute(rec) ?? ''; rec[f.key]=val;
+    const el=container.querySelector('#comp-'+f.key);
+    if(el) el.value=val;
+  });
+  scheduleSave(rec);
 }
 function updateConditionals(container, rec){
   container.querySelectorAll('[data-cond-key]').forEach(el=>{
@@ -515,6 +672,7 @@ function renderWizard(){
     }
   } else {
     body=step.fields.map(f=>fieldHTML(f,rec)).join('');
+    if(step.warnIf){ const msg=step.warnIf(rec); body=`<div id="step-warn-slot">${msg?`<div class="warn-banner">${msg}</div>`:''}</div>`+body; }
   }
   return `${rail}
     <div class="step-count">STEP ${state.wizardStep+1} OF ${WIZARD.length}</div>
@@ -530,9 +688,18 @@ function attachHandlers(){
   const rec=getCurrentRecord();
   if(state.view==='wizard' && rec){
     const body=document.getElementById('wizard-body');
-    bindGenericFields(body, rec);
+    const step=WIZARD[state.wizardStep];
+    bindGenericFields(body, rec, step.fields);
     body.querySelectorAll('[data-inc]').forEach(el=>el.addEventListener('change',()=>{ rec.inclusion[el.dataset.inc]=el.checked; scheduleSave(rec); render(); }));
     body.querySelectorAll('[data-exc]').forEach(el=>el.addEventListener('change',()=>{ rec.exclusion[el.dataset.exc]=el.checked; scheduleSave(rec); render(); }));
+    if(step.warnIf){
+      body.querySelectorAll('[data-key]').forEach(el=>{
+        el.addEventListener(el.tagName==='SELECT'?'change':'input', ()=>{
+          const slot=document.getElementById('step-warn-slot');
+          if(slot){ const msg=step.warnIf(rec); slot.innerHTML=msg?`<div class="warn-banner">${msg}</div>`:''; }
+        });
+      });
+    }
   }
   if(state.view==='record' && rec){
     attachRecordTabHandlers(rec);
@@ -568,22 +735,44 @@ function wizardFinish(){ if(!validateStep()) return; showToast('Enrollment saved
 /* ============================================================
    RECORD DETAIL (post-enrollment tabs)
    ============================================================ */
-const TABS=[['overview','Overview'],['intervention','Intervention'],['pain','Pain (NRS)'],['rescue','Rescue'],['vitals','Vitals'],['followup','Follow-up']];
+const TABS=[['overview','Overview'],['intervention','Intervention'],['timeline','Monitoring'],['rescue','Rescue']];
 
 function renderRecord(){
   const rec=getCurrentRecord(); if(!rec) return '<div class="empty">Record not found.</div>';
   let html=`<div class="tabs">${TABS.map(([id,label])=>`<div class="tab ${state.tab===id?'active':''}" onclick="setTab('${id}')">${label}</div>`).join('')}</div>`;
   if(state.tab==='overview') html+=renderOverviewTab(rec);
   else if(state.tab==='intervention') html+=renderInterventionTab(rec);
-  else if(state.tab==='pain') html+=renderPainTab(rec);
+  else if(state.tab==='timeline') html+=renderTimelineTab(rec);
   else if(state.tab==='rescue') html+=renderRescueTab(rec);
-  else if(state.tab==='vitals') html+=renderVitalsTab(rec);
-  else if(state.tab==='followup') html+=renderFollowupTab(rec);
   return html;
 }
-function setTab(id){ state.tab=id; render(); }
+function setTab(id){ state.tab=id; state.vitalsModalMin=null; render(); }
+
+function computeOverdueList(rec){
+  const t0=rec.t0At? new Date(rec.t0At).getTime() : null;
+  if(!t0) return [];
+  const nowMin=Math.round((Date.now()-t0)/60000);
+  const overdue=[];
+  UNIFIED_TIMEPOINTS.forEach(tp=>{
+    if(nowMin<=tp.min+15) return;
+    const nrsMissing = tp.nrsKey && (rec.nrs[tp.nrsKey]===undefined || rec.nrs[tp.nrsKey]==='');
+    const vcols=['hr','sbp','dbp','rr','spo2','temp','avpu','notes'];
+    const v=rec.vitals[tp.min];
+    const vitalsMissing = tp.vitals && (!v || !vcols.some(c=>v[c]));
+    if(nrsMissing || vitalsMissing) overdue.push('T+'+fmtTimeLabel(tp.min));
+  });
+  return overdue;
+}
 
 function renderOverviewTab(rec){
+  const pe=computePrimaryEndpoint(rec);
+  const peHtml = pe
+    ? `<div class="overview-row"><span class="k">Primary Endpoint (auto)</span><span class="v">T+${pe.minutes}min \u2014 ${pe.source}</span></div>`
+    : `<div class="overview-row"><span class="k">Primary Endpoint (auto)</span><span class="v">Not yet triggered</span></div>`;
+  const overdue=computeOverdueList(rec);
+  const overdueHtml = overdue.length
+    ? `<div class="warn-banner">Overdue right now: ${overdue.join(', ')}</div>`
+    : '';
   let rows='';
   WIZARD.forEach(s=>{
     if(!s.fields) return;
@@ -596,8 +785,13 @@ function renderOverviewTab(rec){
   return `<div class="toolbar">
       <button class="btn primary" onclick="editEnrollment()">Edit Intake</button>
       <button class="btn" onclick="exportOne('${rec.id}')">Export This Record</button>
+      <button class="btn" onclick="shareSummary('${rec.id}')">Share Summary</button>
       <button class="btn danger" onclick="deleteRecord('${rec.id}')">Delete</button>
-    </div>${rows}`;
+    </div>
+    ${overdueHtml}
+    <div class="section-h">Computed</div>
+    ${peHtml}
+    ${rows}`;
 }
 function editEnrollment(){ state.view='wizard'; state.wizardStep=0; render(); }
 async function deleteRecord(id){
@@ -611,39 +805,159 @@ function renderInterventionTab(rec){
     return !f.required || rec[f.key];
   });
   const badge=rec.t0At ? `<span class="badge synced">T0 recorded</span>` : `<span class="badge pending">Not yet given</span>`;
+  const v=rec.vitals['0']||{};
+  const vcols=['hr','sbp','dbp','rr','spo2','temp','avpu','notes'];
+  const vlabels=['HR (bpm)','SBP','DBP','RR (/min)','SpO\u2082 (%)','Temp (\u00b0C)','AVPU','Notes'];
+  const t0vitalsHtml=vcols.map((c,i)=>{
+    let input;
+    if(c==='avpu') input=`<select data-vit="0" data-vf="${c}"><option value=""></option>${['A','V','P','U'].map(o=>`<option ${v[c]===o?'selected':''}>${o}</option>`).join('')}</select>`;
+    else if(c==='notes') input=`<input type="text" data-vit="0" data-vf="${c}" value="${v[c]||''}">`;
+    else input=`<input type="number" data-vit="0" data-vf="${c}" value="${v[c]||''}">`;
+    return `<div class="field"><label>${vlabels[i]}</label>${input}</div>`;
+  }).join('');
   return `<div style="margin-bottom:12px;">${badge}</div>
-    <div id="intervention-body">${INTERVENTION_FIELDS.map(f=>fieldHTML(f,rec)).join('')}</div>`;
+    <div id="intervention-body">${INTERVENTION_FIELDS.map(f=>fieldHTML(f,rec)).join('')}</div>
+    <div class="section-h">Vitals at T+0 (feeds the Monitoring timeline)</div>
+    ${t0vitalsHtml}`;
 }
 
-function renderPainTab(rec){
+function renderTimelineTab(rec){
   const t0=rec.t0At? new Date(rec.t0At).getTime() : null;
   const nowMin = t0? Math.round((Date.now()-t0)/60000) : null;
-  let rowsHtml=NRS_TIMEPOINTS.map(tp=>{
-    const val=rec.nrs[tp.k] ?? '';
+  const vcols=['hr','sbp','dbp','rr','spo2','temp','avpu','notes'];
+  const elapsed=elapsedSinceT0(rec);
+  const t0Badge=t0
+    ? `<span class="badge synced">Elapsed since T0: ${elapsed}</span>`
+    : `<span class="badge pending">T0 not recorded yet \u2014 enter it on the Intervention tab to unlock clock times</span>`;
+
+  let rows='';
+  let lastVitalsMin=null;
+  UNIFIED_TIMEPOINTS.forEach(tp=>{
+    const nrsVal = tp.nrsKey? (rec.nrs[tp.nrsKey] ?? '') : '';
+    const v = tp.vitals? (rec.vitals[tp.min]||{}) : {};
+    const done = (tp.nrsKey && nrsVal!=='') || (tp.vitals && vcols.some(c=>v[c]));
     let cls='';
     if(nowMin!==null){
-      if(val!=='') cls='done';
+      if(done) cls='done';
+      else if(nowMin > tp.min+15) cls='overdue';
       else if(Math.abs(nowMin-tp.min)<=15) cls='due';
     }
-    return `<tr class="${cls}"><td class="tp-label">T+${tp.k}</td><td><input type="number" min="0" max="10" data-nrs="${tp.k}" value="${val}"></td></tr>`;
-  }).join('');
-  return `<div class="field"><label>Onset of significant relief (min after T0, NRS \u22643)</label>
+    const clockTime = t0 ? new Date(t0+tp.min*60000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+
+    const nrsCell = tp.nrsKey
+      ? `<td><input type="number" min="0" max="10" style="width:44px" data-nrs="${tp.nrsKey}" value="${nrsVal}"></td>`
+      : `<td>\u2014</td>`;
+    const isFutureVitals = tp.vitals && (nowMin===null || (tp.min - nowMin > 15));
+    const copyBtn = (tp.vitals && !isFutureVitals && lastVitalsMin!==null)
+      ? `<button type="button" class="btn ghost" style="padding:2px 5px;font-size:10px;margin-top:2px;" onclick="copyPreviousVitals(${lastVitalsMin},${tp.min})" title="Copy previous vitals row">\u21ba copy prev</button>`
+      : '';
+    const vitalCell = tp.vitals
+      ? `<td><button type="button" class="vitals-entry-btn" ${isFutureVitals?'disabled title="Not due yet"':''} onclick="openVitalsModal(${tp.min})">${vitalsSummary(v) || (isFutureVitals?'Not due yet':'Tap to enter')}</button></td>`
+      : `<td>\u2014</td>`;
+    if(tp.vitals) lastVitalsMin=tp.min;
+
+    rows+=`<tr class="${cls}"><td class="tp-label">T+${fmtTimeLabel(tp.min)}${clockTime?`<br><span style="font-weight:400;color:var(--text-dim);font-size:10px;">${clockTime}</span>`:''}${copyBtn?`<br>${copyBtn}`:''}</td>${nrsCell}${vitalCell}</tr>`;
+
+    if(tp.followup){
+      const prefix = tp.min===720? 't12':'t24';
+      const f=rec.followup[prefix]||{};
+      rows+=`<tr class="${cls}"><td colspan="3" style="padding:8px 4px;">
+        <div class="rescue-block" style="margin:2px 0;">
+          <h4>${fmtTimeLabel(tp.min)} Follow-up Call${clockTime?' \u2014 due ~'+clockTime:''}</h4>
+          <div class="field"><label>Call Date/Time</label><div style="display:flex;gap:6px;"><input type="datetime-local" data-fu="${prefix}" data-ff="dateTime" value="${f.dateTime||''}"><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div></div>
+          <div class="field"><label>Rescue Taken After ED?</label><select data-fu="${prefix}" data-ff="rescueTaken"><option value=""></option><option ${f.rescueTaken==='Yes'?'selected':''}>Yes</option><option ${f.rescueTaken==='No'?'selected':''}>No</option></select></div>
+          <div class="field"><label>Rescue Details</label><input type="text" data-fu="${prefix}" data-ff="rescueDetails" value="${f.rescueDetails||''}"></div>
+          <div class="field"><label>Any AE / Revisit?</label><select data-fu="${prefix}" data-ff="ae"><option value=""></option><option ${f.ae==='Yes'?'selected':''}>Yes</option><option ${f.ae==='No'?'selected':''}>No</option></select></div>
+          <div class="field"><label>AE Details</label><input type="text" data-fu="${prefix}" data-ff="aeDetails" value="${f.aeDetails||''}"></div>
+        </div>
+      </td></tr>`;
+    }
+  });
+
+  return `<div style="margin-bottom:12px;">${t0Badge}</div>
+    <div class="field"><label>Onset of significant relief (min after T0, NRS \u22643)</label>
       <input type="number" data-key="onsetReliefMin" value="${rec.onsetReliefMin||''}"></div>
-    <div class="section-h">Scheduled NRS (0\u201310) \u2014 due window highlighted</div>
-    <div class="tbl-wrap"><table class="grid-table"><tr><th>Time</th><th>NRS</th></tr>${rowsHtml}</table></div>`;
+    <div class="section-h">Timeline \u2014 NRS + Vitals; amber = due soon, red = overdue; vitals lock until their time arrives; tap Vitals to enter; times below update from your Intervention T0; 12h/24h rows include the follow-up call</div>
+    <div class="tbl-wrap"><table class="grid-table"><tr><th>Time</th><th>NRS</th><th>Vitals</th></tr>${rows}</table></div>
+    ${state.vitalsModalMin!==null ? renderVitalsModal(rec, state.vitalsModalMin) : ''}`;
+}
+function vitalsSummary(v){
+  if(!v || !Object.keys(v).length) return '';
+  const parts=[];
+  if(v.hr) parts.push(v.hr+' bpm');
+  if(v.sbp || v.dbp) parts.push((v.sbp||'?')+'/'+(v.dbp||'?'));
+  if(v.rr) parts.push(v.rr+'/min');
+  if(v.spo2) parts.push(v.spo2+'%');
+  if(v.temp) parts.push(v.temp+'\u00b0C');
+  if(v.avpu) parts.push(v.avpu);
+  let s=parts.join(' \u00b7 ');
+  if(v.notes) s+=(s?' \u2014 ':'')+v.notes;
+  return s;
+}
+function openVitalsModal(min){ state.vitalsModalMin=min; render(); }
+function closeVitalsModal(){ state.vitalsModalMin=null; render(); }
+function setAvpu(min, val){
+  const rec=getCurrentRecord(); if(!rec) return;
+  rec.vitals[min]=rec.vitals[min]||{};
+  rec.vitals[min].avpu = (rec.vitals[min].avpu===val) ? '' : val;
+  scheduleSave(rec); render();
+}
+function renderVitalsModal(rec, min){
+  const v=rec.vitals[min]||{};
+  const t0=rec.t0At? new Date(rec.t0At).getTime() : null;
+  const clockTime = t0 ? new Date(t0+min*60000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+  const numField=(key,label)=>`<div class="field"><label>${label}</label>
+      <input type="number" data-vit="${min}" data-vf="${key}" value="${v[key]||''}" style="font-size:19px;padding:14px;text-align:center;"></div>`;
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeVitalsModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div><div style="font-weight:700;font-size:16px;">Vitals \u2014 T+${fmtTimeLabel(+min)}</div>${clockTime?`<div class="hint">${clockTime}</div>`:''}</div>
+        <button class="icon-btn" style="color:var(--ink);font-size:22px;" onclick="closeVitalsModal()">\u2715</button>
+      </div>
+      <div class="modal-body">
+        ${numField('hr','HR (bpm)')}
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;">${numField('sbp','SBP')}</div>
+          <div style="flex:1;">${numField('dbp','DBP')}</div>
+        </div>
+        ${numField('rr','RR (/min)')}
+        ${numField('spo2','SpO\u2082 (%)')}
+        ${numField('temp','Temp (\u00b0C)')}
+        <div class="field"><label>AVPU</label>
+          <div style="display:flex;gap:8px;">
+            ${['A','V','P','U'].map(o=>`<button type="button" class="btn ${v.avpu===o?'primary':''}" style="flex:1;padding:14px;font-size:16px;" onclick="setAvpu('${min}','${o}')">${o}</button>`).join('')}
+          </div>
+        </div>
+        <div class="field"><label>Notes</label><textarea data-vit="${min}" data-vf="notes" style="font-size:15px;">${v.notes||''}</textarea></div>
+      </div>
+      <div class="modal-footer"><button class="btn primary" style="width:100%;padding:14px;font-size:15px;" onclick="closeVitalsModal()">Done</button></div>
+    </div>
+  </div>`;
+}
+function copyPreviousVitals(fromMin, toMin){
+  const rec=getCurrentRecord(); if(!rec) return;
+  const src=rec.vitals[fromMin]; if(!src) return;
+  rec.vitals[toMin]={...src};
+  scheduleSave(rec); render();
+  showToast('Copied vitals from T+'+fmtTimeLabel(+fromMin));
 }
 
 function renderRescueTab(rec){
-  let html=`<div class="field"><label>Trigger Met (NRS \u22654 \u226530min post-T0 or recurrence)</label>
+  const hasRescueData=(rec.rescues||[]).some(r=>r && (r.dateTime||r.drug||r.dose));
+  const inconsistent = hasRescueData && rec.triggerMet!=='Yes';
+  let html = inconsistent
+    ? `<div class="warn-banner">A rescue dose is logged but Trigger Met is not set to Yes \u2014 check for a data entry mismatch.</div>`
+    : '';
+  html+=`<div class="field"><label>Trigger Met (NRS \u22654 \u226530min post-T0 or recurrence)</label>
       <select data-key="triggerMet"><option value=""></option><option value="Yes" ${rec.triggerMet==='Yes'?'selected':''}>Yes</option><option value="No" ${rec.triggerMet==='No'?'selected':''}>No</option></select></div>
-    <div class="field"><label>Trigger Time</label><input type="time" data-key="triggerTime" value="${rec.triggerTime||''}"></div>
+    <div class="field"><label>Trigger Time</label><div style="display:flex;gap:6px;"><input type="time" data-key="triggerTime" value="${rec.triggerTime||''}"><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div></div>
     <div class="section-h">Rescue Doses (up to 3)</div>`;
   const shown=Math.max(1, rec.rescues.filter(r=>r&&Object.keys(r).length).length, rec.rescues.length);
   for(let i=0;i<Math.min(3,Math.max(1,shown));i++){
     const r=rec.rescues[i]||{};
     html+=`<div class="rescue-block">
       <h4>Rescue #${i+1}</h4>
-      <div class="field"><label>Date/Time</label><input type="datetime-local" data-rescue="${i}" data-rf="dateTime" value="${r.dateTime||''}"></div>
+      <div class="field"><label>Date/Time</label><div style="display:flex;gap:6px;"><input type="datetime-local" data-rescue="${i}" data-rf="dateTime" value="${r.dateTime||''}"><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div></div>
       <div class="field"><label>Drug</label><select data-rescue="${i}" data-rf="drug"><option value=""></option>${RESCUE_DRUGS.map(d=>`<option ${r.drug===d?'selected':''}>${d}</option>`).join('')}</select></div>
       <div class="field"><label>Dose</label><input type="text" data-rescue="${i}" data-rf="dose" value="${r.dose||''}"></div>
       <div class="field"><label>Route</label><input type="text" data-rescue="${i}" data-rf="route" value="${r.route||''}"></div>
@@ -656,40 +970,6 @@ function renderRescueTab(rec){
 }
 function addRescue(){ const rec=getCurrentRecord(); rec.rescues.push({}); scheduleSave(rec); render(); }
 
-function renderVitalsTab(rec){
-  const t0=rec.t0At? new Date(rec.t0At).getTime() : null;
-  const nowMin = t0? Math.round((Date.now()-t0)/60000) : null;
-  const cols=['hr','sbp','dbp','rr','spo2','temp','avpu','notes'];
-  const labels=['HR','SBP','DBP','RR','SpO\u2082','Temp','AVPU','Notes'];
-  let rows=VITALS_TIMEPOINTS.map(min=>{
-    const v=rec.vitals[min]||{};
-    const done=cols.some(c=>v[c]);
-    let cls=''; if(nowMin!==null){ if(done) cls='done'; else if(Math.abs(nowMin-min)<=15) cls='due'; }
-    const cells=cols.map(c=>{
-      if(c==='avpu') return `<td><select data-vit="${min}" data-vf="${c}"><option value=""></option>${['A','V','P','U'].map(o=>`<option ${v[c]===o?'selected':''}>${o}</option>`).join('')}</select></td>`;
-      if(c==='notes') return `<td><input type="text" style="width:70px" data-vit="${min}" data-vf="${c}" value="${v[c]||''}"></td>`;
-      return `<td><input type="number" style="width:52px" data-vit="${min}" data-vf="${c}" value="${v[c]||''}"></td>`;
-    }).join('');
-    return `<tr class="${cls}"><td class="tp-label">${min}m</td>${cells}</tr>`;
-  }).join('');
-  return `<div class="section-h">Vitals Monitoring \u2014 q30min for \u22658h post-T0</div>
-    <div class="tbl-wrap"><table class="grid-table"><tr><th>Time</th>${labels.map(l=>`<th>${l}</th>`).join('')}</tr>${rows}</table></div>`;
-}
-
-function renderFollowupTab(rec){
-  function block(prefix,title){
-    const f=rec.followup[prefix]||{};
-    return `<div class="section-h">${title}</div>
-      <div class="field"><label>Date/Time</label><input type="datetime-local" data-fu="${prefix}" data-ff="dateTime" value="${f.dateTime||''}"></div>
-      <div class="field"><label>NRS</label><input type="number" data-fu="${prefix}" data-ff="nrs" value="${f.nrs||''}"></div>
-      <div class="field"><label>Rescue Taken After ED?</label><select data-fu="${prefix}" data-ff="rescueTaken"><option value=""></option><option ${f.rescueTaken==='Yes'?'selected':''}>Yes</option><option ${f.rescueTaken==='No'?'selected':''}>No</option></select></div>
-      <div class="field"><label>Rescue Details</label><input type="text" data-fu="${prefix}" data-ff="rescueDetails" value="${f.rescueDetails||''}"></div>
-      <div class="field"><label>Any AE / Revisit?</label><select data-fu="${prefix}" data-ff="ae"><option value=""></option><option ${f.ae==='Yes'?'selected':''}>Yes</option><option ${f.ae==='No'?'selected':''}>No</option></select></div>
-      <div class="field"><label>AE Details</label><input type="text" data-fu="${prefix}" data-ff="aeDetails" value="${f.aeDetails||''}"></div>`;
-  }
-  return block('t12','T+12h Call')+block('t24','T+24h Call');
-}
-
 function attachRecordTabHandlers(rec){
   const main=document.querySelector('main');
   const interventionBody=document.getElementById('intervention-body');
@@ -699,12 +979,29 @@ function attachRecordTabHandlers(rec){
     el.addEventListener('input',()=>{ rec[el.dataset.key]=el.value; scheduleSave(rec); });
   });
   main.querySelectorAll('[data-nrs]').forEach(el=>{
-    el.addEventListener('input',()=>{ rec.nrs[el.dataset.nrs]=el.value; scheduleSave(rec); });
+    el.addEventListener('input',()=>{
+      const key=el.dataset.nrs;
+      rec.nrs[key]=el.value; scheduleSave(rec);
+      const val=+el.value;
+      const tp=UNIFIED_TIMEPOINTS.find(t=>t.nrsKey===key);
+      if(state.tab==='timeline' && tp && tp.min>30 && !isNaN(val) && el.value!=='' && val>=4){
+        if(rec.triggerMet!=='Yes'){
+          rec.triggerMet='Yes';
+          if(!rec.triggerTime) rec.triggerTime=new Date().toTimeString().slice(0,5);
+        }
+        scheduleSave(rec);
+        showToast('NRS \u22654 past 30min \u2014 opening Rescue');
+        state.tab='rescue'; render();
+      }
+    });
   });
   main.querySelectorAll('[data-vit]').forEach(el=>{
+    const range=RANGES[el.dataset.vf];
+    if(range) applyRangeCheck(el, range);
     el.addEventListener('input',()=>{
       const min=el.dataset.vit, f=el.dataset.vf;
       rec.vitals[min]=rec.vitals[min]||{}; rec.vitals[min][f]=el.value; scheduleSave(rec);
+      if(range) applyRangeCheck(el, range);
     });
   });
   main.querySelectorAll('[data-rescue]').forEach(el=>{
@@ -726,6 +1023,8 @@ function attachRecordTabHandlers(rec){
    ============================================================ */
 function renderSettings(){
   const s=state.settings;
+  const notifSupported = 'Notification' in window;
+  const perm = notifSupported ? Notification.permission : 'unsupported';
   return `<div class="settings-item">
       <label>Apps Script Sync URL</label>
       <input type="text" id="syncUrlInput" placeholder="https://script.google.com/macros/s/XXXX/exec" value="${s.syncUrl||''}">
@@ -737,6 +1036,16 @@ function renderSettings(){
       <div style="margin-top:10px;"><button class="btn" onclick="syncAll()">Sync Now</button></div>
     </div>
     <div class="settings-item">
+      <label>Due-time Reminders</label>
+      <div class="hint">Notifies you when an NRS or vitals timepoint becomes due, while this app is open (foreground or a background tab). It cannot wake your phone if the app/browser is fully closed \u2014 that needs a push server, which this offline app doesn't have. Works best on Android; iOS Safari limits background tabs.</div>
+      <div style="margin-top:10px;">
+        ${!notifSupported ? '<div class="hint">Notifications are not supported in this browser.</div>'
+          : perm==='granted'
+            ? `<button class="btn ${s.remindersEnabled?'primary':''}" onclick="toggleReminders()">${s.remindersEnabled?'Reminders On \u2014 tap to turn off':'Turn Reminders On'}</button>`
+            : `<button class="btn primary" onclick="enableReminders()">Enable Reminders</button>`}
+      </div>
+    </div>
+    <div class="settings-item">
       <div class="hint">All data is stored on this device (IndexedDB) and works fully offline, including Excel export. Sync is optional and only needed to back your data up to the shared Google Sheet.</div>
     </div>`;
 }
@@ -746,6 +1055,74 @@ async function saveSyncUrl(){
   state.settings.syncUrl=document.getElementById('syncUrlInput').value.trim();
   await dbPut('settings',state.settings);
   showToast('Sync URL saved');
+}
+
+async function enableReminders(){
+  if(!('Notification' in window)){ showToast('Notifications not supported in this browser'); return; }
+  const perm=await Notification.requestPermission();
+  if(perm!=='granted'){ showToast('Notification permission denied'); render(); return; }
+  state.settings.key='app'; state.settings.remindersEnabled=true;
+  await dbPut('settings',state.settings);
+  showToast('Reminders on \u2014 keep the app open to receive them');
+  render();
+}
+async function toggleReminders(){
+  state.settings.remindersEnabled=!state.settings.remindersEnabled;
+  await dbPut('settings',state.settings);
+  showToast(state.settings.remindersEnabled? 'Reminders on':'Reminders off');
+  render();
+}
+
+function fireReminderNotification(rec, msg){
+  const title='Scorpion CRF \u2014 '+rec.id;
+  const opts={ body:msg, tag:rec.id+'-'+msg, icon:'icon.svg' };
+  if(navigator.serviceWorker && navigator.serviceWorker.ready){
+    navigator.serviceWorker.ready.then(reg=>reg.showNotification(title, opts)).catch(()=>{ try{ new Notification(title, opts); }catch(e){} });
+  } else {
+    try{ new Notification(title, opts); }catch(e){}
+  }
+}
+
+async function checkReminders(){
+  if(!state.settings.remindersEnabled) return;
+  if(!('Notification' in window) || Notification.permission!=='granted') return;
+  for(const rec of state.records){
+    if(!rec.t0At) continue;
+    const nowMin=Math.round((Date.now()-new Date(rec.t0At).getTime())/60000);
+    rec.notified = rec.notified || {};
+    let changed=false;
+    UNIFIED_TIMEPOINTS.forEach(tp=>{
+      if(tp.nrsKey){
+        const key='nrs-'+tp.nrsKey;
+        const val=rec.nrs[tp.nrsKey];
+        const done = val!==undefined && val!=='';
+        if(!done && nowMin>=tp.min-1 && nowMin<=tp.min+15 && !rec.notified[key]){
+          fireReminderNotification(rec, 'NRS due at T+'+fmtTimeLabel(tp.min));
+          rec.notified[key]=true; changed=true;
+        }
+      }
+      if(tp.vitals){
+        const key='vit-'+tp.min;
+        const v=rec.vitals[tp.min];
+        const done = v && Object.keys(v).some(c=>v[c]);
+        if(!done && nowMin>=tp.min-1 && nowMin<=tp.min+15 && !rec.notified[key]){
+          fireReminderNotification(rec, 'Vitals due at T+'+fmtTimeLabel(tp.min));
+          rec.notified[key]=true; changed=true;
+        }
+      }
+      if(tp.followup){
+        const prefix=tp.min===720?'t12':'t24';
+        const key='fu-'+prefix;
+        const f=rec.followup[prefix];
+        const done = f && f.dateTime;
+        if(!done && nowMin>=tp.min-1 && nowMin<=tp.min+15 && !rec.notified[key]){
+          fireReminderNotification(rec, fmtTimeLabel(tp.min)+' follow-up call due');
+          rec.notified[key]=true; changed=true;
+        }
+      }
+    });
+    if(changed) await dbPut('records',rec);
+  }
 }
 
 async function syncAll(){
@@ -781,18 +1158,21 @@ function buildSheetsFor(records){
   const flatCols=[];
   WIZARD.forEach(s=>{ if(s.fields) s.fields.forEach(f=>flatCols.push(f.key)); });
   INTERVENTION_FIELDS.forEach(f=>flatCols.push(f.key));
-  const recordsRows=[ ['StudyID', ...flatCols, ...INCLUSION.map(c=>'INC_'+c.key), ...EXCLUSION.map(c=>'EXC_'+c.key), 'OnsetReliefMin','TriggerMet','TriggerTime','Synced'] ];
+  const recordsRows=[ ['StudyID', ...flatCols, ...INCLUSION.map(c=>'INC_'+c.key), ...EXCLUSION.map(c=>'EXC_'+c.key), 'OnsetReliefMin','TriggerMet','TriggerTime','PrimaryEndpointMin','PrimaryEndpointSource','Missing_NRS_Timepoints','Missing_Vitals_Timepoints','Synced'] ];
   const nrsRows=[['StudyID','Timepoint','NRS']];
   const rescueRows=[['StudyID','RescueNum','DateTime','Drug','Dose','Route','ResponseNRS','Notes']];
   const vitalsRows=[['StudyID','TimeMin','HR','SBP','DBP','RR','SpO2','Temp','AVPU','Notes']];
   const fuRows=[['StudyID','Call','DateTime','NRS','RescueTakenAfterED','RescueDetails','AE_Revisit','AE_Details']];
 
   records.forEach(r=>{
-    recordsRows.push([ r.id, ...flatCols.map(k=>r[k]??''), ...INCLUSION.map(c=>r.inclusion[c.key]?'Yes':'No'), ...EXCLUSION.map(c=>r.exclusion[c.key]?'Yes':'No'), r.onsetReliefMin??'', r.triggerMet??'', r.triggerTime??'', r.synced?'Yes':'No' ]);
+    const pe=computePrimaryEndpoint(r);
+    const missingNrs=NRS_TIMEPOINTS.filter(tp=>r.nrs[tp.k]===undefined || r.nrs[tp.k]==='').map(tp=>'T+'+tp.k).join(', ');
+    const missingVitals=VITALS_TIMEPOINTS.filter(min=>{ const v=r.vitals[min]; return !v || !Object.keys(v).length; }).map(min=>min+'m').join(', ');
+    recordsRows.push([ r.id, ...flatCols.map(k=>r[k]??''), ...INCLUSION.map(c=>r.inclusion[c.key]?'Yes':'No'), ...EXCLUSION.map(c=>r.exclusion[c.key]?'Yes':'No'), r.onsetReliefMin??'', r.triggerMet??'', r.triggerTime??'', pe?pe.minutes:'', pe?pe.source:'', missingNrs, missingVitals, r.synced?'Yes':'No' ]);
     NRS_TIMEPOINTS.forEach(tp=>{ const v=r.nrs[tp.k]; if(v!==undefined && v!=='') nrsRows.push([r.id,'T+'+tp.k, +v]); });
     (r.rescues||[]).forEach((rr,i)=>{ if(rr && Object.keys(rr).length) rescueRows.push([r.id, i+1, rr.dateTime||'', rr.drug||'', rr.dose||'', rr.route||'', rr.responseNRS??'', rr.notes||'']); });
     VITALS_TIMEPOINTS.forEach(min=>{ const v=r.vitals[min]; if(v && Object.keys(v).length) vitalsRows.push([r.id, min, v.hr??'', v.sbp??'', v.dbp??'', v.rr??'', v.spo2??'', v.temp??'', v.avpu??'', v.notes??'']); });
-    ['t12','t24'].forEach(p=>{ const f=r.followup[p]; if(f && Object.keys(f).length) fuRows.push([r.id, p==='t12'?'T+12h':'T+24h', f.dateTime||'', f.nrs??'', f.rescueTaken||'', f.rescueDetails||'', f.ae||'', f.aeDetails||'']); });
+    ['t12','t24'].forEach(p=>{ const f=r.followup[p]; if(f && Object.keys(f).length){ const nrsKey=p==='t12'?'12h':'24h'; fuRows.push([r.id, p==='t12'?'T+12h':'T+24h', f.dateTime||'', r.nrs[nrsKey]??'', f.rescueTaken||'', f.rescueDetails||'', f.ae||'', f.aeDetails||'']); } });
   });
   return [
     {name:'Records', rows:recordsRows},
@@ -814,6 +1194,36 @@ async function exportOne(id){
   showToast('Exported '+rec.id);
 }
 
+async function shareSummary(id){
+  const rec=state.records.find(r=>r.id===id);
+  const pe=computePrimaryEndpoint(rec);
+  const overdue=computeOverdueList(rec);
+  const lines=[
+    'Scorpion Sting CRF \u2014 '+rec.id,
+    'Age/Sex: '+(rec.age||'\u2014')+' / '+(rec.sex||'\u2014'),
+    'Sting site: '+(rec.stingSite||'\u2014')+(rec.side?(' ('+rec.side+')'):''),
+    'Technique: '+(rec.technique||'\u2014'),
+    'T0: '+(rec.t0At||'not recorded'),
+    'Baseline NRS: '+(rec.painNRS||'\u2014'),
+    'Trigger Met: '+(rec.triggerMet||'\u2014')+(rec.triggerTime?(' at '+rec.triggerTime):''),
+    'Primary Endpoint: '+(pe?('T+'+pe.minutes+'min \u2014 '+pe.source):'Not yet triggered'),
+    'Overdue now: '+(overdue.length?overdue.join(', '):'None'),
+    'Synced: '+(rec.synced?'Yes':'No'),
+  ];
+  const text=lines.join('\n');
+  if(navigator.share){
+    try{ await navigator.share({title:'CRF Summary '+rec.id, text}); return; }catch(e){ /* fall through */ }
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    try{ await navigator.clipboard.writeText(text); showToast('Summary copied to clipboard'); return; }catch(e){ /* fall through */ }
+  }
+  const blob=new Blob([text],{type:'text/plain'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=rec.id+'_summary.txt'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1000);
+  showToast('Summary saved as text file');
+}
+
 /* ============================================================
    INIT
    ============================================================ */
@@ -824,6 +1234,8 @@ window.addEventListener('offline', render);
   await loadSettings();
   render();
   if(navigator.onLine && state.settings.syncUrl){ syncAll(); }
+  checkReminders();
+  setInterval(checkReminders, 60000);
 })();
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });

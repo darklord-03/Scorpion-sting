@@ -18,6 +18,18 @@ self.addEventListener('activate', (event) => {
 // Cache-first for our own app shell; network requests to the sync URL
 // (a different origin) are never intercepted here, so sync still needs
 // a live connection - that's expected.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if ('focus' in client) return client.focus();
+      }
+      if (clients.openWindow) return clients.openWindow('./index.html');
+    })
+  );
+});
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return; // let cross-origin (sync) requests pass through untouched
