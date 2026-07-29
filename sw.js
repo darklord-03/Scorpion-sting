@@ -1,0 +1,34 @@
+const CACHE_NAME = 'scorpion-crf-v1';
+const ASSETS = ['./', './index.html', './manifest.json', './icon.svg'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    ).then(() => self.clients.claim())
+  );
+});
+
+// Cache-first for our own app shell; network requests to the sync URL
+// (a different origin) are never intercepted here, so sync still needs
+// a live connection - that's expected.
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return; // let cross-origin (sync) requests pass through untouched
+  event.respondWith(
+    caches.match(event.request).then((cached) => {
+      if (cached) return cached;
+      return fetch(event.request).then((resp) => {
+        const copy = resp.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        return resp;
+      }).catch(() => cached);
+    })
+  );
+});

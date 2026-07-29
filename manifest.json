@@ -1,0 +1,13 @@
+{
+  "name": "Scorpion Sting CRF",
+  "short_name": "Scorpion CRF",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F1F4F3",
+  "theme_color": "#0D3B3E",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
