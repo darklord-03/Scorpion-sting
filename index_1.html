@@ -1,0 +1,1515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scorpion Sting CRF</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0D3B3E">
+<link rel="apple-touch-icon" href="icon.svg">
+<style>
+  :root{
+    --ink:#0D3B3E;
+    --ink-2:#154C4F;
+    --teal:#1F6F72;
+    --teal-soft:#DCEAE9;
+    --bg:#F1F4F3;
+    --card:#FFFFFF;
+    --line:#DDE3E1;
+    --text:#132321;
+    --text-dim:#5B6A67;
+    --amber:#B07A2E;
+    --due:#B23A48;
+    --due-soft:#F7E4E3;
+    --ok:#3F7D5C;
+    --ok-soft:#E1EFE6;
+    --radius:10px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);-webkit-tap-highlight-color:transparent;}
+  body{padding-bottom:env(safe-area-inset-bottom);}
+  #app{max-width:640px;margin:0 auto;min-height:100%;display:flex;flex-direction:column;}
+
+  /* Top bar */
+  .topbar{background:var(--ink);color:#fff;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:20;}
+  .topbar h1{font-size:16px;margin:0;font-weight:650;letter-spacing:.2px;}
+  .topbar .sub{font-size:11px;opacity:.7;font-family:var(--mono);}
+  .icon-btn{background:none;border:none;color:#fff;font-size:20px;padding:6px 8px;cursor:pointer;line-height:1;}
+  .net-pill{font-family:var(--mono);font-size:10px;padding:3px 8px;border-radius:99px;border:1px solid rgba(255,255,255,.35);}
+  .net-pill.online{background:rgba(63,125,92,.25);border-color:rgba(63,125,92,.6);}
+  .net-pill.offline{background:rgba(178,58,72,.25);border-color:rgba(178,58,72,.6);}
+
+  main{flex:1;padding:14px 14px 90px;}
+
+  /* Home list */
+  .fab{position:fixed;left:50%;transform:translateX(calc(-50% + 260px));bottom:20px;background:var(--teal);color:#fff;border:none;border-radius:99px;padding:14px 20px;font-size:15px;font-weight:600;box-shadow:0 6px 16px rgba(15,60,58,.35);cursor:pointer;z-index:30;}
+  @media (max-width:640px){.fab{transform:none;right:16px;left:auto;}}
+  .toolbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;}
+  .btn{border:1px solid var(--line);background:var(--card);color:var(--text);padding:9px 13px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;}
+  .btn.primary{background:var(--teal);border-color:var(--teal);color:#fff;}
+  .btn.ghost{background:transparent;}
+  .btn.danger{color:var(--due);border-color:var(--due);}
+  .btn:disabled{opacity:.45;cursor:default;}
+
+  .record-card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px;cursor:pointer;}
+  .record-card .row1{display:flex;justify-content:space-between;align-items:center;}
+  .record-card .sid{font-family:var(--mono);font-weight:700;font-size:14px;}
+  .badge{font-size:10px;font-family:var(--mono);padding:3px 7px;border-radius:99px;}
+  .badge.synced{background:var(--ok-soft);color:var(--ok);}
+  .badge.pending{background:var(--due-soft);color:var(--due);}
+  .badge.status-active{background:var(--teal-soft);color:var(--ink-2);}
+  .badge.status-rescue{background:var(--due-soft);color:var(--due);}
+  .badge.status-loss{background:#E4E4E2;color:#5B6A67;}
+  .record-card .meta{font-size:12px;color:var(--text-dim);margin-top:4px;}
+  .empty{text-align:center;color:var(--text-dim);padding:60px 20px;font-size:14px;}
+
+  /* Wizard */
+  .rail{display:flex;gap:4px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px;}
+  .rail .dot{flex:1;min-width:18px;height:5px;border-radius:99px;background:var(--line);}
+  .rail .dot.done{background:var(--teal);}
+  .rail .dot.current{background:var(--ink);}
+  .step-title{font-size:18px;font-weight:700;margin:0 0 2px;}
+  .step-count{font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-bottom:16px;}
+
+  .field{margin-bottom:14px;}
+  .field.hidden{display:none;}
+  .field label{display:block;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:5px;}
+  .field .req{color:var(--due);}
+  input[type=text],input[type=number],input[type=tel],input[type=time],input[type=datetime-local],textarea,select{
+    width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:15px;background:#fff;color:var(--text);font-family:var(--sans);
+  }
+  input[type=number],input[type=time],input[type=datetime-local]{font-family:var(--mono);}
+  textarea{min-height:56px;resize:vertical;}
+  input[readonly]{background:var(--teal-soft);color:var(--ink-2);font-weight:700;}
+  .grid-table input:disabled,.grid-table select:disabled{background:#EDEEEC;color:#A3ABA8;cursor:not-allowed;}
+  input.out-of-range,select.out-of-range{border-color:var(--due) !important;background:var(--due-soft) !important;}
+  .vitals-entry-btn{width:100%;text-align:left;padding:8px 6px;font-size:11.5px;background:#fff;border:1px solid var(--line);border-radius:6px;color:var(--text);min-height:34px;}
+  .vitals-entry-btn:disabled{background:#EDEEEC;color:#A3ABA8;}
+  .modal-overlay{position:fixed;inset:0;background:rgba(10,20,19,.5);display:flex;align-items:flex-end;justify-content:center;z-index:60;}
+  .modal-card{background:var(--bg);width:100%;max-width:480px;max-height:88vh;overflow-y:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));}
+  .modal-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;}
+  .modal-footer{margin-top:6px;}
+  .checkline{display:flex;align-items:flex-start;gap:9px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px;}
+  .checkline input{margin-top:3px;width:18px;height:18px;flex-shrink:0;}
+  .warn-banner{background:var(--due-soft);color:var(--due);border-radius:8px;padding:9px 12px;font-size:12.5px;margin-bottom:12px;font-weight:600;}
+  .section-h{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-dim);font-weight:700;margin:18px 0 8px;}
+
+  .wizard-nav{display:flex;gap:10px;margin-top:6px;position:sticky;bottom:0;background:var(--bg);padding:12px 0 4px;}
+  .wizard-nav .btn{flex:1;padding:13px;}
+
+  /* Tabs (record detail) */
+  .tabs{display:flex;gap:2px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:3px;margin-bottom:16px;overflow-x:auto;}
+  .tab{flex:1;text-align:center;padding:8px 6px;font-size:12px;font-weight:650;border-radius:7px;cursor:pointer;color:var(--text-dim);white-space:nowrap;}
+  .tab.active{background:var(--ink);color:#fff;}
+
+  .overview-row{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;gap:10px;}
+  .overview-row .k{color:var(--text-dim);}
+  .overview-row .v{font-family:var(--mono);text-align:right;}
+
+  .grid-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+  .grid-table th{font-size:10px;text-transform:uppercase;color:var(--text-dim);padding:4px 3px;text-align:left;}
+  .grid-table td{padding:3px 2px;vertical-align:middle;}
+  .grid-table input,.grid-table select{padding:6px 4px;font-size:12.5px;font-family:var(--mono);}
+  .grid-table tr.due td{background:#F7EEDA;}
+  .grid-table tr.overdue td{background:var(--due-soft);}
+  .grid-table tr.done td{background:var(--ok-soft);}
+  .tp-label{font-family:var(--mono);font-weight:700;white-space:nowrap;}
+  .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+
+  .rescue-block{border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--card);}
+  .rescue-block h4{margin:0 0 10px;font-size:13px;}
+
+  .settings-item{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;}
+  .settings-item label{display:block;font-size:12px;font-weight:600;margin-bottom:6px;color:var(--ink-2);}
+  .settings-item .hint{font-size:11.5px;color:var(--text-dim);margin-top:6px;line-height:1.4;}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:99px;font-size:13px;z-index:99;opacity:0;transition:opacity .25s;pointer-events:none;}
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+<script>
+/* ============================================================
+   MINI XLSX WRITER (pure JS, no dependencies, works fully offline)
+   ============================================================ */
+const MiniXlsx = (function(){
+  function crc32(buf){
+    let table = crc32.table;
+    if(!table){
+      table = crc32.table = new Uint32Array(256);
+      for(let n=0;n<256;n++){
+        let c=n;
+        for(let k=0;k<8;k++) c = (c&1)?(0xEDB88320 ^ (c>>>1)):(c>>>1);
+        table[n]=c>>>0;
+      }
+    }
+    let crc=0xFFFFFFFF;
+    for(let i=0;i<buf.length;i++) crc = table[(crc ^ buf[i]) & 0xFF] ^ (crc>>>8);
+    return (crc ^ 0xFFFFFFFF)>>>0;
+  }
+  function strToBytes(str){ return new TextEncoder().encode(str); }
+  function u16(n){ return [n&0xFF,(n>>8)&0xFF]; }
+  function u32(n){ return [n&0xFF,(n>>8)&0xFF,(n>>16)&0xFF,(n>>>24)&0xFF]; }
+  const DOS_TIME=0, DOS_DATE=0x21;
+
+  function makeZip(files){
+    let localParts=[], centralParts=[], offset=0;
+    for(const f of files){
+      const nameBytes=strToBytes(f.name), data=f.data;
+      const crc=crc32(data), size=data.length;
+      const localHeader=new Uint8Array([
+        0x50,0x4B,0x03,0x04, ...u16(20), ...u16(0), ...u16(0),
+        ...u16(DOS_TIME), ...u16(DOS_DATE), ...u32(crc), ...u32(size), ...u32(size),
+        ...u16(nameBytes.length), ...u16(0),
+      ]);
+      localParts.push(localHeader,nameBytes,data);
+      const centralHeader=new Uint8Array([
+        0x50,0x4B,0x01,0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0),
+        ...u16(DOS_TIME), ...u16(DOS_DATE), ...u32(crc), ...u32(size), ...u32(size),
+        ...u16(nameBytes.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset),
+      ]);
+      centralParts.push(centralHeader,nameBytes);
+      offset += localHeader.length + nameBytes.length + data.length;
+    }
+    const centralStart=offset;
+    let centralSize=0; for(const p of centralParts) centralSize+=p.length;
+    const eocd=new Uint8Array([
+      0x50,0x4B,0x05,0x06, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length),
+      ...u32(centralSize), ...u32(centralStart), ...u16(0),
+    ]);
+    const allParts=[...localParts,...centralParts,eocd];
+    let total=0; for(const p of allParts) total+=p.length;
+    const out=new Uint8Array(total); let pos=0;
+    for(const p of allParts){ out.set(p,pos); pos+=p.length; }
+    return out;
+  }
+  function colLetter(n){ let s=''; n=n+1; while(n>0){ let rem=(n-1)%26; s=String.fromCharCode(65+rem)+s; n=Math.floor((n-1)/26);} return s; }
+  function xmlEscape(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;'); }
+  function sheetXml(rows){
+    let sheetData='';
+    rows.forEach((row,rIdx)=>{
+      sheetData+=`<row r="${rIdx+1}">`;
+      row.forEach((cell,cIdx)=>{
+        const ref=`${colLetter(cIdx)}${rIdx+1}`;
+        if(cell===null||cell===undefined||cell===''){ /* omit */ }
+        else if(typeof cell==='number' && isFinite(cell)) sheetData+=`<c r="${ref}"><v>${cell}</v></c>`;
+        else sheetData+=`<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(cell)}</t></is></c>`;
+      });
+      sheetData+=`</row>`;
+    });
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${sheetData}</sheetData></worksheet>`;
+  }
+  function buildXlsx(sheets){
+    const files=[];
+    files.push({name:'[Content_Types].xml', data:strToBytes(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">`+
+      `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`+
+      `<Default Extension="xml" ContentType="application/xml"/>`+
+      `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`+
+      sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+
+      `<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>`+
+      `</Types>`
+    )});
+    files.push({name:'_rels/.rels', data:strToBytes(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`+
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>`+
+      `</Relationships>`
+    )});
+    files.push({name:'xl/workbook.xml', data:strToBytes(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`+
+      `<sheets>`+sheets.map((s,i)=>`<sheet name="${xmlEscape(s.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')+`</sheets>`+
+      `</workbook>`
+    )});
+    files.push({name:'xl/_rels/workbook.xml.rels', data:strToBytes(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">`+
+      sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+
+      `<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`+
+      `</Relationships>`
+    )});
+    files.push({name:'xl/styles.xml', data:strToBytes(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`+
+      `<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>`+
+      `<fills count="1"><fill><patternFill patternType="none"/></fill></fills>`+
+      `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>`+
+      `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>`+
+      `<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>`+
+      `</styleSheet>`
+    )});
+    sheets.forEach((s,i)=>{ files.push({name:`xl/worksheets/sheet${i+1}.xml`, data:strToBytes(sheetXml(s.rows))}); });
+    return makeZip(files);
+  }
+  return { buildXlsx };
+})();
+
+/* ============================================================
+   INDEXEDDB LAYER
+   ============================================================ */
+const DB_NAME='scorpion_crf_db', DB_VERSION=1;
+function openDB(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(DB_NAME,DB_VERSION);
+    req.onupgradeneeded=()=>{
+      const db=req.result;
+      if(!db.objectStoreNames.contains('records')) db.createObjectStore('records',{keyPath:'id'});
+      if(!db.objectStoreNames.contains('settings')) db.createObjectStore('settings',{keyPath:'key'});
+    };
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+let _db;
+async function db(){ if(!_db) _db=await openDB(); return _db; }
+async function dbPut(store,val){ const d=await db(); return new Promise((res,rej)=>{ const tx=d.transaction(store,'readwrite'); tx.objectStore(store).put(val); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+async function dbGet(store,key){ const d=await db(); return new Promise((res,rej)=>{ const tx=d.transaction(store,'readonly'); const r=tx.objectStore(store).get(key); r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function dbGetAll(store){ const d=await db(); return new Promise((res,rej)=>{ const tx=d.transaction(store,'readonly'); const r=tx.objectStore(store).getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>rej(r.error); }); }
+async function dbDelete(store,key){ const d=await db(); return new Promise((res,rej)=>{ const tx=d.transaction(store,'readwrite'); tx.objectStore(store).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+
+/* ============================================================
+   FIELD CONFIG
+   ============================================================ */
+function computeTimeSinceSting(rec){
+  if(!rec.stingAt || !rec.screenAt) return '';
+  const ms=new Date(rec.screenAt)-new Date(rec.stingAt);
+  if(isNaN(ms) || ms<0) return '';
+  const totalMin=Math.round(ms/60000);
+  return Math.floor(totalMin/60)+':'+String(totalMin%60).padStart(2,'0');
+}
+function timeSinceStingMinutes(rec){
+  const v=computeTimeSinceSting(rec); if(!v) return null;
+  const [h,m]=v.split(':').map(Number); return h*60+m;
+}
+function computeMAP(rec){
+  if(rec.sbp==='' || rec.sbp===undefined || rec.dbp==='' || rec.dbp===undefined) return '';
+  const sbp=+rec.sbp, dbp=+rec.dbp;
+  if(isNaN(sbp) || isNaN(dbp)) return '';
+  return Math.round(dbp + (sbp-dbp)/3);
+}
+function computePrimaryEndpoint(rec){
+  if(!rec.t0At) return null;
+  let best=null, source=null;
+  (rec.rescues||[]).forEach(r=>{
+    if(r && r.dateTime){
+      const min=Math.round((new Date(r.dateTime)-new Date(rec.t0At))/60000);
+      if(!isNaN(min) && (best===null || min<best)){ best=min; source='First rescue dose'; }
+    }
+  });
+  UNIFIED_TIMEPOINTS.forEach(tp=>{
+    if(!tp.nrsKey || tp.min<=30) return;
+    const v=rec.nrs[tp.nrsKey];
+    if(v!==undefined && v!=='' && +v>=4){
+      if(best===null || tp.min<best){ best=tp.min; source='NRS \u22654 at T+'+fmtTimeLabel(tp.min); }
+    }
+  });
+  return best===null ? null : { minutes:best, source };
+}
+function elapsedSinceT0(rec){
+  if(!rec.t0At) return null;
+  const min=Math.round((Date.now()-new Date(rec.t0At).getTime())/60000);
+  if(min<0) return null;
+  return Math.floor(min/60)+'h '+(min%60)+'m';
+}
+
+const WIZARD = [
+  { id:'ids', title:'Study Identifiers', warnIf:(rec)=>{
+      if(!rec.mobile) return null;
+      const dup=state.records.find(r=>r.id!==rec.id && r.mobile && r.mobile===rec.mobile);
+      return dup ? `Possible duplicate: mobile number matches existing record ${dup.id}.` : null;
+    }, fields:[
+    {key:'studyId',label:'Study ID (auto-generated)',type:'text',required:true,readonly:true},
+    {key:'mrdNo',label:'MRD / Hospital No.',type:'text'},
+    {key:'randEnvNo',label:'Randomization Envelope (SNOSE) No.',type:'text'},
+    {key:'randOpenedAt',label:'Date/Time Envelope Opened',type:'datetime-local'},
+    {key:'initials',label:'Participant Initials',type:'text'},
+    {key:'age',label:'Age (y)',type:'number',required:true},
+    {key:'sex',label:'Sex',type:'select',options:['Male','Female'],required:true},
+    {key:'mobile',label:'Mobile',type:'tel'},
+    {key:'altContact',label:'Alternative Contact',type:'tel'},
+    {key:'address',label:'Address',type:'textarea'},
+  ]},
+  { id:'screen', title:'Screening & Consent', fields:[
+    {key:'screenAt',label:'Date/Time of Screening',type:'datetime-local'},
+    {key:'consentObtained',label:'Informed Consent Obtained',type:'select',options:['Yes','No'],required:true},
+    {key:'consentNoReason',label:'If No, Reason',type:'text',cond:{k:'consentObtained',v:'No'}},
+    {key:'pregTest',label:'Urine Pregnancy Test',type:'select',options:['Neg','Pos','NA'],cond:{k:'sex',v:'Female'}},
+    {key:'witness',label:'Witness Name/Phone',type:'text'},
+  ]},
+  { id:'eligibility', title:'Eligibility Checklist', custom:'eligibility' },
+  { id:'sting', title:'Sting & Baseline Clinical Data', warnIf:(rec)=>{
+      const min=timeSinceStingMinutes(rec);
+      return (min!==null && min>360) ? 'Time since sting exceeds 6 hours \u2014 this contradicts the inclusion criterion.' : null;
+    }, fields:[
+    {key:'stingAt',label:'Date/Time of Sting',type:'datetime-local',required:true},
+    {key:'timeSinceSting',label:'Time Since Sting (h:mm, auto)',type:'text',computed:true,compute:computeTimeSinceSting},
+    {key:'stingLocation',label:'Location (village/district)',type:'text'},
+    {key:'stingSite',label:'Sting Site',type:'select',options:['Finger','Other Toe','Great Toe','Hand','Foot','Forearm','Arm','Leg','Thigh','Trunk','Other']},
+    {key:'stingSiteOther',label:'Sting Site (Other)',type:'text',cond:{k:'stingSite',v:'Other'}},
+    {key:'side',label:'Side (if limb)',type:'select',options:['Right','Left','NA']},
+    {key:'scorpionSeen',label:'Scorpion Seen/Identified',type:'select',options:['Yes','No']},
+    {key:'scorpionSpecies',label:'Species (if known)',type:'text',cond:{k:'scorpionSeen',v:'Yes'}},
+    {key:'comorbidities',label:'Comorbidities',type:'textarea'},
+    {key:'currentMeds',label:'Current Medications',type:'textarea'},
+    {key:'allergies',label:'Allergies',type:'textarea'},
+  ]},
+  { id:'baseline', title:'Baseline Vitals & Exam', warnIf:(rec)=>{
+      if(!rec.qtc) return null;
+      const qtc=+rec.qtc; if(isNaN(qtc)) return null;
+      const threshold = rec.sex==='Male' ? 450 : 470;
+      return qtc>=threshold ? `QTc ${qtc}ms is at/above the prolongation threshold (${threshold}ms) \u2014 chloroquine carries QT risk; review before enrolling.` : null;
+    }, fields:[
+    {key:'baselineAt',label:'Date/Time (T-0 baseline)',type:'datetime-local'},
+    {key:'hr',label:'HR (bpm)',type:'number',range:[30,200]},
+    {key:'sbp',label:'SBP (mmHg)',type:'number',range:[60,250]},
+    {key:'dbp',label:'DBP (mmHg)',type:'number',range:[30,150]},
+    {key:'map',label:'MAP (auto)',type:'number',computed:true,compute:computeMAP},
+    {key:'rr',label:'RR (/min)',type:'number',range:[6,60]},
+    {key:'spo2',label:'SpO\u2082 (%)',type:'number',range:[50,100]},
+    {key:'temp',label:'Temp (\u00b0C)',type:'number',range:[30,42]},
+    {key:'painNRS',label:'Pain NRS (0-10)',type:'number',required:true,min:5},
+    {key:'avpu',label:'AVPU',type:'select',options:['A','V','P','U']},
+    {key:'localExam',label:'Local Exam (erythema/swelling)',type:'select',options:['None','Mild','Mod','Severe']},
+    {key:'localExamNotes',label:'Local Exam Notes',type:'text'},
+    {key:'ecgDone',label:'Baseline 12-lead ECG Done',type:'select',options:['Yes','No']},
+    {key:'qtc',label:'QTc (ms)',type:'number'},
+    {key:'qrs',label:'QRS (ms)',type:'number'},
+    {key:'ecgComments',label:'ECG Comments',type:'text'},
+  ]},
+  { id:'documents', title:'Attach Case Sheet / Consent Photos', custom:'documents' },
+];
+
+const INTERVENTION_FIELDS=[
+  {key:'t0At',label:'Date/Time of Injection (T0)',type:'datetime-local',required:true},
+  {key:'technique',label:'Technique',type:'select',options:['Ring block (non-digit)','Digital ring block (finger)','Tumescent finger block','Great toe 3-sided block','Toe digital block (non-great toe)']},
+  {key:'aspiration',label:'Aspiration Prior to Injection',type:'select',options:['Performed','Not done']},
+  {key:'aspirationReason',label:'Reason Not Done',type:'text',cond:{k:'aspiration',v:'Not done'}},
+  {key:'totalVolume',label:'Total Volume Injected (mL)',type:'number'},
+  {key:'needleGauge',label:'Needle Gauge',type:'select',options:['24G','Other']},
+  {key:'needleGaugeOther',label:'Needle Gauge (Other)',type:'text',cond:{k:'needleGauge',v:'Other'}},
+  {key:'immediateIssues',label:'Immediate Issues',type:'select',options:['None','Difficult infiltration','Vascular puncture','Other']},
+  {key:'immediateIssuesOther',label:'Issues (Other)',type:'text',cond:{k:'immediateIssues',v:'Other'}},
+];
+
+const NRS_TIMEPOINTS=[{k:'15',min:15},{k:'30',min:30},{k:'60',min:60},{k:'90',min:90},{k:'120',min:120},{k:'150',min:150},{k:'180',min:180},{k:'210',min:210},{k:'240',min:240},{k:'270',min:270},{k:'300',min:300},{k:'330',min:330},{k:'360',min:360},{k:'8h',min:480},{k:'10h',min:600},{k:'12h',min:720},{k:'24h',min:1440}];
+const VITALS_TIMEPOINTS=[0,30,60,90,120,150,180,210,240,270,300,330,360,390,420,450,480];
+const RESCUE_DRUGS=['Paracetamol 1g IV','Tramadol 50-100mg IV','Fentanyl mcg IV','Ketorolac mg IV','Other'];
+const THESIS_TARGET=80;
+
+// One merged, time-ordered schedule combining NRS + Vitals + the 12h/24h follow-up
+// calls, so all monitoring lives in a single timeline instead of three tabs.
+const UNIFIED_TIMEPOINTS=(function(){
+  const map=new Map();
+  NRS_TIMEPOINTS.forEach(tp=>{ map.set(tp.min,{min:tp.min,nrsKey:tp.k,vitals:false,followup:(tp.min===720||tp.min===1440)}); });
+  VITALS_TIMEPOINTS.forEach(min=>{
+    if(min===0) return; // T+0 vitals are captured on the Intervention tab instead
+    if(map.has(min)) map.get(min).vitals=true;
+    else map.set(min,{min,nrsKey:null,vitals:true,followup:false});
+  });
+  return Array.from(map.values()).sort((a,b)=>a.min-b.min);
+})();
+function fmtTimeLabel(min){ return min<480 ? (min+'m') : ((min/60)+'h'); }
+
+const INCLUSION=[
+  {key:'age18to60',label:'Age \u226518 and \u226460 years'},
+  {key:'within6h',label:'Presentation within 6 hours of definite scorpion sting'},
+  {key:'localizedGradeI',label:'Localized pain (Grade I envenomation)'},
+  {key:'nrsGE5',label:'Baseline NRS pain score \u22655/10'},
+];
+const EXCLUSION=[
+  {key:'systemicEnvenom',label:'Systemic envenomation (\u2265 Grade II) / requires antivenom/ICU'},
+  {key:'allergy',label:'Allergy/hypersensitivity to chloroquine or amide local anesthetics'},
+  {key:'pregLact',label:'Pregnancy or lactation'},
+  {key:'g6pdEtc',label:'G6PD deficiency, retinopathy, psoriasis, or known significant arrhythmia/QT prolongation'},
+  {key:'priorAnalgesia',label:'Received parenteral analgesia or local anesthetic prior to enrollment'},
+  {key:'localInfection',label:'Local infection/necrosis at sting site'},
+];
+
+/* ============================================================
+   APP STATE
+   ============================================================ */
+const state={ view:'home', records:[], trash:[], recordId:null, wizardStep:0, tab:'overview', settings:{}, vitalsModalMin:null, lossModalOpen:false, confirmModal:null };
+let saveTimer=null;
+
+function generateStudyId(){
+  const year=new Date().getFullYear();
+  const existingNums=state.records
+    .map(r=>{ const m=/JIP-EM-(\d{4})-(\d{3})/.exec(r.id||''); return (m && +m[1]===year) ? +m[2] : 0; })
+    .filter(n=>n>0);
+  const next=(existingNums.length? Math.max(...existingNums):0)+1;
+  return `JIP-EM-${year}-${next.toString().padStart(3,'0')}`;
+}
+function newRecordSkeleton(){
+  const id=generateStudyId();
+  return { id, studyId:id, createdAt:Date.now(), updatedAt:Date.now(), synced:false, status:'active',
+    inclusion:{}, exclusion:{}, nrs:{}, vitals:{}, rescues:[], followup:{t12:{},t24:{}}, photos:[] };
+}
+function updateStatusFromTrigger(rec){
+  if(rec.status==='loss_to_followup') return;
+  rec.status = rec.triggerMet==='Yes' ? 'rescue_triggered' : 'active';
+}
+function monitoringLocked(rec){
+  return rec.status==='rescue_triggered' || rec.status==='loss_to_followup';
+}
+function statusInfo(rec){
+  if(rec.status==='rescue_triggered') return {text:'Rescue Triggered', cls:'status-rescue'};
+  if(rec.status==='loss_to_followup') return {text:'Loss to Follow-up', cls:'status-loss'};
+  return {text:'Active', cls:'status-active'};
+}
+
+function showToast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(showToast._t); showToast._t=setTimeout(()=>t.classList.remove('show'),1800);
+}
+
+function scheduleSave(rec){
+  rec.updatedAt=Date.now();
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>{ dbPut('records',rec); },400);
+}
+
+async function loadAll(){
+  const all=await dbGetAll('records');
+  await purgeOldTrash(all);
+  state.records=all.filter(r=>!r.deletedAt).sort((a,b)=>b.updatedAt-a.updatedAt);
+  state.trash=all.filter(r=>r.deletedAt).sort((a,b)=>b.deletedAt-a.deletedAt);
+}
+async function purgeOldTrash(all){
+  const cutoff=Date.now()-7*24*60*60*1000;
+  const stale=all.filter(r=>r.deletedAt && r.deletedAt<cutoff);
+  for(const r of stale){ await dbDelete('records', r.id); }
+  if(stale.length){
+    const staleIds=new Set(stale.map(r=>r.id));
+    for(let i=all.length-1;i>=0;i--){ if(staleIds.has(all[i].id)) all.splice(i,1); }
+  }
+}
+async function loadSettings(){ state.settings=(await dbGet('settings','app'))||{key:'app',syncUrl:'',lastSync:null,remindersEnabled:false}; }
+
+/* ============================================================
+   RENDER: ROOT
+   ============================================================ */
+async function render(){
+  const app=document.getElementById('app');
+  let html='';
+  html+=renderTopbar();
+  html+='<main>';
+  if(state.view==='home') html+=renderHome();
+  else if(state.view==='wizard') html+=renderWizard();
+  else if(state.view==='record') html+=renderRecord();
+  else if(state.view==='settings') html+=renderSettings();
+  else if(state.view==='trash') html+=renderTrash();
+  html+='</main>';
+  if(state.view==='home') html+='<button class="fab" onclick="startNewRecord()">+ New Enrollment</button>';
+  if(state.view==='record' && state.tab==='timeline') html+='<button class="fab" style="background:var(--due);" onclick="openLossModal()">Loss to F/U</button>';
+  if(state.confirmModal) html+=renderConfirmModal();
+  app.innerHTML=html;
+  attachHandlers();
+}
+function appConfirm(message, callback){ state.confirmModal={ message, callback }; render(); }
+function cancelAppConfirm(){ state.confirmModal=null; render(); }
+async function runAppConfirm(){
+  const cb=state.confirmModal && state.confirmModal.callback;
+  state.confirmModal=null;
+  if(cb) await cb();
+  render();
+}
+function renderConfirmModal(){
+  const m=state.confirmModal;
+  return `<div class="modal-overlay" onclick="if(event.target===this) cancelAppConfirm()">
+    <div class="modal-card">
+      <div class="modal-header"><div style="font-weight:700;font-size:16px;">Please Confirm</div></div>
+      <div class="modal-body"><div class="warn-banner">${m.message}</div></div>
+      <div class="modal-footer" style="display:flex;gap:10px;">
+        <button class="btn" style="flex:1;padding:14px;" onclick="cancelAppConfirm()">Cancel</button>
+        <button class="btn danger" style="flex:1;padding:14px;" onclick="runAppConfirm()">Confirm</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTopbar(){
+  const online=navigator.onLine;
+  let title='Scorpion Sting CRF', sub='Chloroquine vs Lidocaine \u00b7 JIPMER EMT';
+  let back='';
+  if(state.view!=='home'){ back=`<button class="icon-btn" onclick="goHome()">\u2190</button>`; }
+  if(state.view==='wizard') sub='New Enrollment';
+  if(state.view==='record'){ const r=getCurrentRecord(); if(r) sub=r.id; }
+  if(state.view==='settings') sub='Settings & Sync';
+  if(state.view==='trash') sub='Trash';
+  return `<div class="topbar">
+    <div style="display:flex;align-items:center;gap:6px;">${back}<div><h1>${title}</h1><div class="sub">${sub}</div></div></div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span class="net-pill ${online?'online':'offline'}">${online?'ONLINE':'OFFLINE'}</span>
+      ${state.view==='home'?'<button class="icon-btn" onclick="goSettings()">\u2699</button>':''}
+    </div>
+  </div>`;
+}
+
+/* ============================================================
+   HOME
+   ============================================================ */
+function renderHome(){
+  let html=`<div class="toolbar">
+    <button class="btn primary" onclick="exportAll()">Export All to Excel</button>
+    <button class="btn" onclick="syncAll()">Sync Now</button>
+  </div>`;
+  const total0=state.records.length;
+  const pct0=Math.min(100, Math.round(100*total0/THESIS_TARGET));
+  html+=`<div class="settings-item">
+    <div style="display:flex;justify-content:space-between;font-size:12.5px;font-weight:600;color:var(--ink-2);margin-bottom:6px;">
+      <span>Thesis Enrollment Progress</span><span>${total0} / ${THESIS_TARGET} (${pct0}%)</span>
+    </div>
+    <div style="background:var(--line);border-radius:99px;height:10px;overflow:hidden;">
+      <div style="background:var(--teal);height:100%;width:${pct0}%;"></div>
+    </div>
+    ${total0<THESIS_TARGET ? `<div class="hint" style="margin-top:6px;">${THESIS_TARGET-total0} more to reach target</div>` : `<div class="hint" style="margin-top:6px;">Target reached</div>`}
+  </div>`;
+  if(state.records.length){
+    const total=state.records.length;
+    const intakeComplete=state.records.filter(r=>recordCompleteness(r)===100).length;
+    const pendingFollowup=state.records.filter(r=>{
+      const f=r.followup||{};
+      return !(f.t12 && f.t12.dateTime) || !(f.t24 && f.t24.dateTime);
+    }).length;
+    html+=`<div class="settings-item" style="display:flex;justify-content:space-around;text-align:center;">
+      <div><div style="font-size:20px;font-weight:700;">${total}</div><div class="hint">Enrolled</div></div>
+      <div><div style="font-size:20px;font-weight:700;">${intakeComplete}/${total}</div><div class="hint">Intake complete</div></div>
+      <div><div style="font-size:20px;font-weight:700;">${pendingFollowup}</div><div class="hint">Pending follow-up</div></div>
+    </div>`;
+  }
+  if(!state.records.length){
+    html+=`<div class="empty">No records yet.<br>Tap <b>+ New Enrollment</b> to start your first CRF.</div>`;
+  } else {
+    html+=`<input type="text" id="homeSearch" placeholder="Search by Study ID, technique, sync status..." oninput="filterHome()" style="margin-bottom:12px;">`;
+    for(const r of state.records){
+      const pct=recordCompleteness(r);
+      const si=statusInfo(r);
+      const searchBlob=`${r.id} ${r.technique||''} ${r.synced?'synced':'not synced pending'} ${r.sex||''} ${si.text}`.toLowerCase();
+      html+=`<div class="record-card" data-search="${searchBlob}" onclick="openRecord('${r.id}')">
+        <div class="row1">
+          <span class="sid">${r.id}</span>
+          <span style="display:flex;align-items:center;gap:8px;">
+            <span class="badge ${si.cls}">${si.text.toUpperCase()}</span>
+            <span class="badge ${r.synced?'synced':'pending'}">${r.synced?'SYNCED':'NOT SYNCED'}</span>
+            <button class="icon-btn" style="color:var(--due);font-size:16px;padding:2px 4px;" onclick="event.stopPropagation();deleteRecord('${r.id}')">\u2715</button>
+          </span>
+        </div>
+        <div class="meta">${r.age?('Age '+r.age+', '):''}${r.sex||''} \u00b7 ${r.technique||'Technique not set'} \u00b7 ${pct}% complete</div>
+      </div>`;
+    }
+  }
+  return html;
+}
+
+function recordCompleteness(r){
+  let total=0,filled=0;
+  WIZARD.forEach(s=>{ if(s.fields) s.fields.forEach(f=>{ total++; if(r[f.key]) filled++; }); });
+  return total? Math.round(100*filled/total) : 0;
+}
+
+async function startNewRecord(){
+  const rec=newRecordSkeleton();
+  await dbPut('records',rec);
+  await loadAll();
+  state.recordId=rec.id; state.view='wizard'; state.wizardStep=0;
+  render();
+}
+function defaultTabFor(rec){ return rec && rec.t0At ? 'timeline' : 'intervention'; }
+function openRecord(id){
+  state.recordId=id;
+  state.view='record';
+  const rec=state.records.find(r=>r.id===id);
+  state.tab=defaultTabFor(rec);
+  state.vitalsModalMin=null;
+  state.lossModalOpen=false;
+  render();
+}
+function filterHome(){
+  const q=(document.getElementById('homeSearch').value||'').toLowerCase().trim();
+  document.querySelectorAll('.record-card').forEach(el=>{
+    el.style.display = (!q || (el.dataset.search||'').includes(q)) ? '' : 'none';
+  });
+}
+function goHome(){ state.view='home'; loadAll().then(render); }
+function goSettings(){ state.view='settings'; render(); }
+
+function getCurrentRecord(){ return state.records.find(r=>r.id===state.recordId); }
+
+/* ============================================================
+   GENERIC FIELD RENDERING
+   ============================================================ */
+function fieldHTML(f, rec){
+  let val;
+  if(f.computed){ val=f.compute(rec) ?? ''; rec[f.key]=val; }
+  else val = rec[f.key] ?? '';
+  const hidden = f.cond && rec[f.cond.k]!==f.cond.v;
+  let input='';
+  if(f.type==='select'){
+    input=`<select data-key="${f.key}"><option value=""></option>${f.options.map(o=>`<option value="${o}" ${o===val?'selected':''}>${o}</option>`).join('')}</select>`;
+  } else if(f.type==='textarea'){
+    input=`<textarea data-key="${f.key}">${val}</textarea>`;
+  } else if(f.computed){
+    input=`<input type="${f.type}" id="comp-${f.key}" value="${val}" readonly>`;
+  } else {
+    const tag=`<input type="${f.type}" data-key="${f.key}" value="${val}" ${f.readonly?'readonly':''}>`;
+    input = (!f.readonly && (f.type==='datetime-local'||f.type==='time'))
+      ? `<div style="display:flex;gap:6px;">${tag}<button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div>`
+      : tag;
+  }
+  return `<div class="field ${hidden?'hidden':''}" id="wrap-${f.key}" ${f.cond?`data-cond-key="${f.cond.k}" data-cond-val="${f.cond.v}"`:''}>
+    <label>${f.label}${f.required?' <span class="req">*</span>':''}</label>${input}
+  </div>`;
+}
+function setNowSibling(btn){
+  const input=btn.previousElementSibling;
+  const d=new Date();
+  const pad=n=>String(n).padStart(2,'0');
+  input.value = (input.type==='time')
+    ? pad(d.getHours())+':'+pad(d.getMinutes())
+    : d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'T'+pad(d.getHours())+':'+pad(d.getMinutes());
+  input.dispatchEvent(new Event('input',{bubbles:true}));
+}
+
+const RANGES={hr:[30,200],sbp:[60,250],dbp:[30,150],rr:[6,60],spo2:[50,100],temp:[30,42]};
+function applyRangeCheck(el, range){
+  const v=+el.value;
+  const bad = el.value!=='' && !isNaN(v) && (v<range[0]||v>range[1]);
+  el.classList.toggle('out-of-range', bad);
+}
+
+function bindGenericFields(container, rec, fieldsList){
+  container.querySelectorAll('[data-key]').forEach(el=>{
+    const f = fieldsList && fieldsList.find(x=>x.key===el.dataset.key);
+    if(f && f.range) applyRangeCheck(el, f.range);
+    el.addEventListener(el.tagName==='SELECT'?'change':'input', ()=>{
+      rec[el.dataset.key]=el.value;
+      scheduleSave(rec);
+      if(el.tagName==='SELECT') updateConditionals(container, rec);
+      if(fieldsList) refreshComputedFields(container, fieldsList, rec);
+      if(f && f.range) applyRangeCheck(el, f.range);
+    });
+  });
+}
+function refreshComputedFields(container, fieldsList, rec){
+  fieldsList.forEach(f=>{
+    if(!f.computed) return;
+    const val=f.compute(rec) ?? ''; rec[f.key]=val;
+    const el=container.querySelector('#comp-'+f.key);
+    if(el) el.value=val;
+  });
+  scheduleSave(rec);
+}
+function updateConditionals(container, rec){
+  container.querySelectorAll('[data-cond-key]').forEach(el=>{
+    const show = rec[el.dataset.condKey]===el.dataset.condVal;
+    el.classList.toggle('hidden', !show);
+  });
+}
+
+/* ============================================================
+   WIZARD
+   ============================================================ */
+function renderWizard(){
+  const rec=getCurrentRecord(); if(!rec) return '<div class="empty">Record not found.</div>';
+  const step=WIZARD[state.wizardStep];
+  let rail='<div class="rail">'+WIZARD.map((s,i)=>`<div class="dot ${i<state.wizardStep?'done':i===state.wizardStep?'current':''}"></div>`).join('')+'</div>';
+  let body='';
+  if(step.custom==='eligibility'){
+    body+='<div class="section-h">Inclusion \u2014 all should be Yes</div>';
+    INCLUSION.forEach(c=>{
+      body+=`<label class="checkline"><input type="checkbox" data-inc="${c.key}" ${rec.inclusion[c.key]?'checked':''}> ${c.label}</label>`;
+    });
+    body+='<div class="section-h">Exclusion \u2014 all should be No</div>';
+    EXCLUSION.forEach(c=>{
+      body+=`<label class="checkline"><input type="checkbox" data-exc="${c.key}" ${rec.exclusion[c.key]?'checked':''}> ${c.label}</label>`;
+    });
+    const anyExc=Object.values(rec.exclusion).some(Boolean);
+    const allInc=INCLUSION.every(c=>rec.inclusion[c.key]);
+    if(anyExc || !allInc){
+      body=`<div class="warn-banner">${anyExc?'An exclusion criterion is checked \u2014 this participant is not eligible. Uncheck it to proceed, or exit and do not enroll.':'Not all inclusion criteria are confirmed yet.'}</div>`+body;
+    }
+  } else if(step.custom==='documents'){
+    body = renderPhotosSection(rec, true);
+  } else {
+    body=step.fields.map(f=>fieldHTML(f,rec)).join('');
+    if(step.warnIf){ const msg=step.warnIf(rec); body=`<div id="step-warn-slot">${msg?`<div class="warn-banner">${msg}</div>`:''}</div>`+body; }
+  }
+  return `${rail}
+    <div class="step-count">STEP ${state.wizardStep+1} OF ${WIZARD.length}</div>
+    <div class="step-title">${step.title}</div>
+    <div id="wizard-body">${body}</div>
+    <div class="wizard-nav">
+      ${state.wizardStep>0?'<button class="btn" onclick="wizardBack()">Back</button>':'<button class="btn ghost" onclick="goHome()">Save &amp; Exit</button>'}
+      ${state.wizardStep<WIZARD.length-1?'<button class="btn primary" onclick="wizardNext()">Next</button>':'<button class="btn primary" onclick="wizardFinish()">Finish Enrollment</button>'}
+    </div>`;
+}
+
+function attachHandlers(){
+  const rec=getCurrentRecord();
+  if(state.view==='wizard' && rec){
+    const body=document.getElementById('wizard-body');
+    const step=WIZARD[state.wizardStep];
+    bindGenericFields(body, rec, step.fields);
+    body.querySelectorAll('[data-inc]').forEach(el=>el.addEventListener('change',()=>{ rec.inclusion[el.dataset.inc]=el.checked; scheduleSave(rec); render(); }));
+    body.querySelectorAll('[data-exc]').forEach(el=>el.addEventListener('change',()=>{ rec.exclusion[el.dataset.exc]=el.checked; scheduleSave(rec); render(); }));
+    if(step.warnIf){
+      body.querySelectorAll('[data-key]').forEach(el=>{
+        el.addEventListener(el.tagName==='SELECT'?'change':'input', ()=>{
+          const slot=document.getElementById('step-warn-slot');
+          if(slot){ const msg=step.warnIf(rec); slot.innerHTML=msg?`<div class="warn-banner">${msg}</div>`:''; }
+        });
+      });
+    }
+  }
+  if(state.view==='record' && rec){
+    attachRecordTabHandlers(rec);
+  }
+  if(state.view==='settings'){
+    attachSettingsHandlers();
+  }
+}
+
+function validateStep(){
+  const rec=getCurrentRecord(); const step=WIZARD[state.wizardStep];
+  if(step.custom==='eligibility'){
+    const anyExc=EXCLUSION.some(c=>rec.exclusion[c.key]);
+    if(anyExc){ showToast('Cannot proceed: an exclusion criterion is checked'); return false; }
+    const allInc=INCLUSION.every(c=>rec.inclusion[c.key]);
+    if(!allInc){ showToast('Cannot proceed: all inclusion criteria must be checked'); return false; }
+    return true;
+  }
+  if(!step.fields) return true;
+  for(const f of step.fields){
+    if(f.required && f.cond && rec[f.cond.k]!==f.cond.v) continue;
+    if(f.required && !rec[f.key]){ showToast('Please fill: '+f.label); return false; }
+    if(f.min!==undefined && rec[f.key]!=='' && rec[f.key]!==undefined && +rec[f.key] < f.min){
+      showToast(f.label+' must be \u2265 '+f.min); return false;
+    }
+  }
+  return true;
+}
+function wizardNext(){ if(!validateStep()) return; state.wizardStep++; render(); }
+function wizardBack(){ state.wizardStep--; render(); }
+function wizardFinish(){ if(!validateStep()) return; showToast('Enrollment saved'); openRecord(state.recordId); }
+
+function renderPhotosSection(rec){
+  const photos = rec.photos || [];
+  const thumbs = photos.map(p=>`
+    <div style="position:relative;display:inline-block;margin:4px;">
+      <img src="${p.dataUrl}" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);">
+      <button type="button" class="icon-btn" style="position:absolute;top:-6px;right:-6px;background:var(--due);color:#fff;border-radius:99px;width:20px;height:20px;font-size:12px;line-height:20px;padding:0;" onclick="removePhoto('${p.id}')">\u2715</button>
+    </div>`).join('');
+  return `<div class="section-h">Case Sheet / Consent Photos</div>
+    <div class="hint" style="margin-bottom:10px;">Stored on this device only (not included in Excel export). Photograph the paper case sheet and signed consent form for your records.</div>
+    <input type="file" accept="image/*" capture="environment" multiple onchange="handlePhotoFiles(this.files); this.value='';" style="margin-bottom:10px;">
+    <div>${thumbs || '<div class="hint">No photos attached yet.</div>'}</div>`;
+}
+function resizeImageFile(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(reader.error);
+    reader.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('bad image'));
+      img.onload=()=>{
+        let {width,height}=img;
+        if(width>maxDim || height>maxDim){
+          if(width>height){ height=Math.round(height*maxDim/width); width=maxDim; }
+          else { width=Math.round(width*maxDim/height); height=maxDim; }
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=width; canvas.height=height;
+        canvas.getContext('2d').drawImage(img,0,0,width,height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+async function handlePhotoFiles(fileList){
+  const rec=getCurrentRecord(); if(!rec) return;
+  const files=Array.from(fileList||[]);
+  if(!files.length) return;
+  let added=0;
+  for(const file of files){
+    try{
+      const dataUrl=await resizeImageFile(file, 1400, 0.72);
+      rec.photos=rec.photos||[];
+      rec.photos.push({ id:'p'+Date.now()+Math.random().toString(36).slice(2,7), dataUrl, addedAt:Date.now(), name:file.name||'photo' });
+      added++;
+    }catch(e){ showToast('Could not read '+(file.name||'a photo')); }
+  }
+  await dbPut('records', rec);
+  if(added) showToast(added+' photo(s) added');
+  render();
+}
+function removePhoto(id){
+  const rec=getCurrentRecord(); if(!rec) return;
+  appConfirm('Remove this photo?', async ()=>{
+    rec.photos=(rec.photos||[]).filter(p=>p.id!==id);
+    await dbPut('records', rec);
+    showToast('Photo removed');
+  });
+}
+
+/* ============================================================
+   RECORD DETAIL (post-enrollment tabs)
+   ============================================================ */
+const TABS=[['overview','Overview'],['intervention','Intervention'],['timeline','Monitoring'],['rescue','Rescue']];
+
+function renderRecord(){
+  const rec=getCurrentRecord(); if(!rec) return '<div class="empty">Record not found.</div>';
+  let html=`<div class="tabs">${TABS.map(([id,label])=>`<div class="tab ${state.tab===id?'active':''}" onclick="setTab('${id}')">${label}</div>`).join('')}</div>`;
+  if(state.tab==='overview') html+=renderOverviewTab(rec);
+  else if(state.tab==='intervention') html+=renderInterventionTab(rec);
+  else if(state.tab==='timeline') html+=renderTimelineTab(rec);
+  else if(state.tab==='rescue') html+=renderRescueTab(rec);
+  return html;
+}
+function setTab(id){ state.tab=id; state.vitalsModalMin=null; state.lossModalOpen=false; render(); }
+
+function computeOverdueList(rec){
+  const t0=rec.t0At? new Date(rec.t0At).getTime() : null;
+  if(!t0) return [];
+  const nowMin=Math.round((Date.now()-t0)/60000);
+  const overdue=[];
+  UNIFIED_TIMEPOINTS.forEach(tp=>{
+    if(nowMin<=tp.min+15) return;
+    const nrsMissing = tp.nrsKey && (rec.nrs[tp.nrsKey]===undefined || rec.nrs[tp.nrsKey]==='');
+    const vcols=['hr','sbp','dbp','rr','spo2','temp','avpu','notes'];
+    const v=rec.vitals[tp.min];
+    const vitalsMissing = tp.vitals && (!v || !vcols.some(c=>v[c]));
+    if(nrsMissing || vitalsMissing) overdue.push('T+'+fmtTimeLabel(tp.min));
+  });
+  return overdue;
+}
+
+function renderOverviewTab(rec){
+  const si=statusInfo(rec);
+  const statusHtml=`<div style="margin-bottom:12px;"><span class="badge ${si.cls}">${si.text.toUpperCase()}</span></div>`;
+  const lossHtml = (rec.status==='loss_to_followup' && rec.lossToFollowup)
+    ? `<div class="overview-row"><span class="k">Last Contact</span><span class="v">${rec.lossToFollowup.lastContact||'\u2014'}</span></div>
+       <div class="overview-row"><span class="k">Recontact Attempts</span><span class="v">${rec.lossToFollowup.attempts??'\u2014'}</span></div>`
+    : '';
+  const pe=computePrimaryEndpoint(rec);
+  const peHtml = pe
+    ? `<div class="overview-row"><span class="k">Primary Endpoint (auto)</span><span class="v">T+${pe.minutes}min \u2014 ${pe.source}</span></div>`
+    : `<div class="overview-row"><span class="k">Primary Endpoint (auto)</span><span class="v">Not yet triggered</span></div>`;
+  const overdue=computeOverdueList(rec);
+  const overdueHtml = overdue.length
+    ? `<div class="warn-banner">Overdue right now: ${overdue.join(', ')}</div>`
+    : '';
+  let rows='';
+  WIZARD.forEach(s=>{
+    if(!s.fields) return;
+    rows+=`<div class="section-h">${s.title}</div>`;
+    s.fields.forEach(f=>{
+      if(f.cond && rec[f.cond.k]!==f.cond.v) return;
+      rows+=`<div class="overview-row"><span class="k">${f.label}</span><span class="v">${rec[f.key]||'\u2014'}</span></div>`;
+    });
+  });
+  return `<div class="toolbar">
+      <button class="btn primary" onclick="editEnrollment()">Edit Intake</button>
+      <button class="btn" onclick="exportOne('${rec.id}')">Export This Record</button>
+      <button class="btn" onclick="shareSummary('${rec.id}')">Share Summary</button>
+      <button class="btn danger" onclick="deleteRecord('${rec.id}')">Delete</button>
+    </div>
+    ${statusHtml}
+    ${overdueHtml}
+    <div class="section-h">Computed</div>
+    ${peHtml}
+    ${lossHtml}
+    ${rows}
+    ${renderPhotosSection(rec)}`;
+}
+function editEnrollment(){ state.view='wizard'; state.wizardStep=0; render(); }
+function deleteRecord(id){
+  appConfirm('Move '+id+' to Trash? It will be permanently deleted after 7 days unless restored.', async ()=>{
+    const rec=state.records.find(r=>r.id===id);
+    if(!rec) return;
+    rec.deletedAt=Date.now();
+    await dbPut('records', rec);
+    await loadAll();
+    showToast('Moved to Trash');
+    goHome();
+  });
+}
+async function restoreRecord(id){
+  const rec=state.trash.find(r=>r.id===id); if(!rec) return;
+  delete rec.deletedAt;
+  await dbPut('records', rec);
+  await loadAll();
+  showToast('Restored');
+  render();
+}
+function permanentlyDeleteRecord(id){
+  appConfirm('Permanently delete '+id+'? This cannot be undone.', async ()=>{
+    await dbDelete('records', id);
+    await loadAll();
+    showToast('Permanently deleted');
+  });
+}
+function goTrash(){ state.view='trash'; render(); }
+function renderTrash(){
+  if(!state.trash.length) return '<div class="empty">Trash is empty.</div>';
+  let html='<div class="hint" style="margin-bottom:12px;">Deleted records are kept for 7 days before being permanently removed.</div>';
+  state.trash.forEach(r=>{
+    const daysLeft=Math.max(0, 7-Math.floor((Date.now()-r.deletedAt)/(24*60*60*1000)));
+    html+=`<div class="record-card">
+      <div class="row1"><span class="sid">${r.id}</span><span class="hint">${daysLeft}d left</span></div>
+      <div class="meta">Deleted ${new Date(r.deletedAt).toLocaleString()}</div>
+      <div class="toolbar" style="margin-top:8px;margin-bottom:0;">
+        <button class="btn primary" onclick="restoreRecord('${r.id}')">Restore</button>
+        <button class="btn danger" onclick="permanentlyDeleteRecord('${r.id}')">Delete Permanently</button>
+      </div>
+    </div>`;
+  });
+  return html;
+}
+
+function renderInterventionTab(rec){
+  const done=INTERVENTION_FIELDS.every(f=>{
+    if(f.cond && rec[f.cond.k]!==f.cond.v) return true;
+    return !f.required || rec[f.key];
+  });
+  const badge=rec.t0At ? `<span class="badge synced">T0 recorded</span>` : `<span class="badge pending">Not yet given</span>`;
+  const v=rec.vitals['0']||{};
+  const vcols=['hr','sbp','dbp','rr','spo2','temp','avpu','notes'];
+  const vlabels=['HR (bpm)','SBP','DBP','RR (/min)','SpO\u2082 (%)','Temp (\u00b0C)','AVPU','Notes'];
+  const t0vitalsHtml=vcols.map((c,i)=>{
+    let input;
+    if(c==='avpu') input=`<select data-vit="0" data-vf="${c}"><option value=""></option>${['A','V','P','U'].map(o=>`<option ${v[c]===o?'selected':''}>${o}</option>`).join('')}</select>`;
+    else if(c==='notes') input=`<input type="text" data-vit="0" data-vf="${c}" value="${v[c]||''}">`;
+    else input=`<input type="number" data-vit="0" data-vf="${c}" value="${v[c]||''}">`;
+    return `<div class="field"><label>${vlabels[i]}</label>${input}</div>`;
+  }).join('');
+  return `<div style="margin-bottom:12px;">${badge}</div>
+    <div id="intervention-body">${INTERVENTION_FIELDS.map(f=>fieldHTML(f,rec)).join('')}</div>
+    <div class="section-h">Vitals at T+0 (feeds the Monitoring timeline)</div>
+    ${t0vitalsHtml}
+    <div class="wizard-nav">
+      <button class="btn ghost" onclick="saveAndExit()">Save &amp; Exit</button>
+      <button class="btn primary" onclick="setTab('timeline')">Proceed to Monitoring</button>
+    </div>`;
+}
+async function saveAndExit(){
+  const rec=getCurrentRecord();
+  if(rec) await flushSave(rec);
+  showToast('Saved');
+  goHome();
+}
+function flushSave(rec){
+  clearTimeout(saveTimer);
+  rec.updatedAt=Date.now();
+  return dbPut('records', rec);
+}
+
+function renderTimelineTab(rec){
+  const t0=rec.t0At? new Date(rec.t0At).getTime() : null;
+  const nowMin = t0? Math.round((Date.now()-t0)/60000) : null;
+  const vcols=['hr','sbp','dbp','rr','spo2','temp','avpu','notes'];
+  const elapsed=elapsedSinceT0(rec);
+  const locked=monitoringLocked(rec);
+  const si=statusInfo(rec);
+  const t0Badge=t0
+    ? `<span class="badge synced">Elapsed since T0: ${elapsed}</span>`
+    : `<span class="badge pending">T0 not recorded yet \u2014 enter it on the Intervention tab to unlock clock times</span>`;
+  const lockedBanner = locked
+    ? `<div class="warn-banner">Monitoring stopped \u2014 status: ${si.text}. Entries below are locked.</div>`
+    : '';
+
+  let rows='';
+  let lastVitalsMin=null;
+  UNIFIED_TIMEPOINTS.forEach(tp=>{
+    const nrsVal = tp.nrsKey? (rec.nrs[tp.nrsKey] ?? '') : '';
+    const v = tp.vitals? (rec.vitals[tp.min]||{}) : {};
+    const done = (tp.nrsKey && nrsVal!=='') || (tp.vitals && vcols.some(c=>v[c]));
+    let cls='';
+    if(nowMin!==null){
+      if(done) cls='done';
+      else if(nowMin > tp.min+15) cls='overdue';
+      else if(Math.abs(nowMin-tp.min)<=15) cls='due';
+    }
+    const clockTime = t0 ? new Date(t0+tp.min*60000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+
+    const nrsCell = tp.nrsKey
+      ? `<td><input type="number" min="0" max="10" style="width:44px" data-nrs="${tp.nrsKey}" value="${nrsVal}" ${locked?'disabled':''}></td>`
+      : `<td>\u2014</td>`;
+    const isFutureVitals = tp.vitals && (nowMin===null || (tp.min - nowMin > 15));
+    const vitalsDisabled = isFutureVitals || locked;
+    const copyBtn = (tp.vitals && !isFutureVitals && !locked && lastVitalsMin!==null)
+      ? `<button type="button" class="btn ghost" style="padding:2px 5px;font-size:10px;margin-top:2px;" onclick="copyPreviousVitals(${lastVitalsMin},${tp.min})" title="Copy previous vitals row">\u21ba copy prev</button>`
+      : '';
+    const vitalCell = tp.vitals
+      ? `<td><button type="button" class="vitals-entry-btn" ${vitalsDisabled?'disabled title="Not due yet, or monitoring stopped"':''} onclick="openVitalsModal(${tp.min})">${vitalsSummary(v) || (vitalsDisabled?'\u2014':'Tap to enter')}</button></td>`
+      : `<td>\u2014</td>`;
+    if(tp.vitals) lastVitalsMin=tp.min;
+
+    rows+=`<tr class="${cls}"><td class="tp-label">T+${fmtTimeLabel(tp.min)}${clockTime?`<br><span style="font-weight:400;color:var(--text-dim);font-size:10px;">${clockTime}</span>`:''}${copyBtn?`<br>${copyBtn}`:''}</td>${nrsCell}${vitalCell}</tr>`;
+
+    if(tp.followup){
+      const prefix = tp.min===720? 't12':'t24';
+      const f=rec.followup[prefix]||{};
+      rows+=`<tr class="${cls}"><td colspan="3" style="padding:8px 4px;">
+        <div class="rescue-block" style="margin:2px 0;">
+          <h4>${fmtTimeLabel(tp.min)} Follow-up Call${clockTime?' \u2014 due ~'+clockTime:''}</h4>
+          <div class="field"><label>Call Date/Time</label><div style="display:flex;gap:6px;"><input type="datetime-local" data-fu="${prefix}" data-ff="dateTime" value="${f.dateTime||''}" ${locked?'disabled':''}><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)" ${locked?'disabled':''}>Now</button></div></div>
+          <div class="field"><label>Rescue Taken After ED?</label><select data-fu="${prefix}" data-ff="rescueTaken" ${locked?'disabled':''}><option value=""></option><option ${f.rescueTaken==='Yes'?'selected':''}>Yes</option><option ${f.rescueTaken==='No'?'selected':''}>No</option></select></div>
+          <div class="field"><label>Rescue Details</label><input type="text" data-fu="${prefix}" data-ff="rescueDetails" value="${f.rescueDetails||''}" ${locked?'disabled':''}></div>
+          <div class="field"><label>Any AE / Revisit?</label><select data-fu="${prefix}" data-ff="ae" ${locked?'disabled':''}><option value=""></option><option ${f.ae==='Yes'?'selected':''}>Yes</option><option ${f.ae==='No'?'selected':''}>No</option></select></div>
+          <div class="field"><label>AE Details</label><input type="text" data-fu="${prefix}" data-ff="aeDetails" value="${f.aeDetails||''}" ${locked?'disabled':''}></div>
+        </div>
+      </td></tr>`;
+    }
+  });
+
+  return `<div style="margin-bottom:12px;">${t0Badge} <span class="badge ${si.cls}">${si.text.toUpperCase()}</span></div>
+    ${lockedBanner}
+    <div class="field"><label>Onset of significant relief (min after T0, NRS \u22643)</label>
+      <input type="number" data-key="onsetReliefMin" value="${rec.onsetReliefMin||''}" ${locked?'disabled':''}></div>
+    <div class="section-h">Timeline \u2014 NRS + Vitals; amber = due soon, red = overdue; vitals lock until their time arrives; tap Vitals to enter; times below update from your Intervention T0; 12h/24h rows include the follow-up call</div>
+    <div class="tbl-wrap"><table class="grid-table"><tr><th>Time</th><th>NRS</th><th>Vitals</th></tr>${rows}</table></div>
+    ${state.vitalsModalMin!==null ? renderVitalsModal(rec, state.vitalsModalMin) : ''}
+    ${state.lossModalOpen ? renderLossModal(rec) : ''}`;
+}
+function vitalsSummary(v){
+  if(!v || !Object.keys(v).length) return '';
+  const parts=[];
+  if(v.hr) parts.push(v.hr+' bpm');
+  if(v.sbp || v.dbp) parts.push((v.sbp||'?')+'/'+(v.dbp||'?'));
+  if(v.rr) parts.push(v.rr+'/min');
+  if(v.spo2) parts.push(v.spo2+'%');
+  if(v.temp) parts.push(v.temp+'\u00b0C');
+  if(v.avpu) parts.push(v.avpu);
+  let s=parts.join(' \u00b7 ');
+  if(v.notes) s+=(s?' \u2014 ':'')+v.notes;
+  return s;
+}
+function openVitalsModal(min){ state.vitalsModalMin=min; render(); }
+function closeVitalsModal(){ state.vitalsModalMin=null; render(); }
+function setAvpu(min, val){
+  const rec=getCurrentRecord(); if(!rec) return;
+  rec.vitals[min]=rec.vitals[min]||{};
+  rec.vitals[min].avpu = (rec.vitals[min].avpu===val) ? '' : val;
+  scheduleSave(rec); render();
+}
+function renderVitalsModal(rec, min){
+  const v=rec.vitals[min]||{};
+  const t0=rec.t0At? new Date(rec.t0At).getTime() : null;
+  const clockTime = t0 ? new Date(t0+min*60000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
+  const numField=(key,label)=>`<div class="field"><label>${label}</label>
+      <input type="number" data-vit="${min}" data-vf="${key}" value="${v[key]||''}" style="font-size:19px;padding:14px;text-align:center;"></div>`;
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeVitalsModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div><div style="font-weight:700;font-size:16px;">Vitals \u2014 T+${fmtTimeLabel(+min)}</div>${clockTime?`<div class="hint">${clockTime}</div>`:''}</div>
+        <button class="icon-btn" style="color:var(--ink);font-size:22px;" onclick="closeVitalsModal()">\u2715</button>
+      </div>
+      <div class="modal-body">
+        ${numField('hr','HR (bpm)')}
+        <div style="display:flex;gap:10px;">
+          <div style="flex:1;">${numField('sbp','SBP')}</div>
+          <div style="flex:1;">${numField('dbp','DBP')}</div>
+        </div>
+        ${numField('rr','RR (/min)')}
+        ${numField('spo2','SpO\u2082 (%)')}
+        ${numField('temp','Temp (\u00b0C)')}
+        <div class="field"><label>AVPU</label>
+          <div style="display:flex;gap:8px;">
+            ${['A','V','P','U'].map(o=>`<button type="button" class="btn ${v.avpu===o?'primary':''}" style="flex:1;padding:14px;font-size:16px;" onclick="setAvpu('${min}','${o}')">${o}</button>`).join('')}
+          </div>
+        </div>
+        <div class="field"><label>Notes</label><textarea data-vit="${min}" data-vf="notes" style="font-size:15px;">${v.notes||''}</textarea></div>
+      </div>
+      <div class="modal-footer"><button class="btn primary" style="width:100%;padding:14px;font-size:15px;" onclick="closeVitalsModal()">Done</button></div>
+    </div>
+  </div>`;
+}
+function copyPreviousVitals(fromMin, toMin){
+  const rec=getCurrentRecord(); if(!rec) return;
+  const src=rec.vitals[fromMin]; if(!src) return;
+  rec.vitals[toMin]={...src};
+  scheduleSave(rec); render();
+  showToast('Copied vitals from T+'+fmtTimeLabel(+fromMin));
+}
+function openLossModal(){ state.lossModalOpen=true; render(); }
+function closeLossModal(){ state.lossModalOpen=false; render(); }
+function renderLossModal(rec){
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeLossModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="font-weight:700;font-size:16px;">Mark as Loss to Follow-up</div>
+        <button class="icon-btn" style="color:var(--ink);font-size:22px;" onclick="closeLossModal()">\u2715</button>
+      </div>
+      <div class="modal-body">
+        <div class="warn-banner">This stops further monitoring for this patient and should only be used when recontact has genuinely failed. This action is hard to reverse cleanly \u2014 you'll get one more confirmation before it saves.</div>
+        <div class="field"><label>Time of Last Contact</label><div style="display:flex;gap:6px;"><input type="datetime-local" id="lossLastContact"><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div></div>
+        <div class="field"><label>Number of Attempts to Recontact</label><input type="number" id="lossAttempts" min="0"></div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:10px;">
+        <button class="btn" style="flex:1;padding:14px;" onclick="closeLossModal()">Cancel</button>
+        <button class="btn danger" style="flex:1;padding:14px;" onclick="confirmLossToFollowup()">Confirm</button>
+      </div>
+    </div>
+  </div>`;
+}
+function confirmLossToFollowup(){
+  const rec=getCurrentRecord(); if(!rec) return;
+  const lastContact=document.getElementById('lossLastContact').value;
+  const attempts=document.getElementById('lossAttempts').value;
+  if(!lastContact){ showToast('Enter time of last contact'); return; }
+  appConfirm('Mark '+rec.id+' as Loss to Follow-up? Further monitoring will be locked.', async ()=>{
+    rec.lossToFollowup={ lastContact, attempts, recordedAt:Date.now() };
+    rec.status='loss_to_followup';
+    await dbPut('records', rec);
+    state.lossModalOpen=false;
+    showToast('Marked as Loss to Follow-up');
+  });
+}
+
+function renderRescueTab(rec){
+  const hasRescueData=(rec.rescues||[]).some(r=>r && (r.dateTime||r.drug||r.dose));
+  const inconsistent = hasRescueData && rec.triggerMet!=='Yes';
+  let html = inconsistent
+    ? `<div class="warn-banner">A rescue dose is logged but Trigger Met is not set to Yes \u2014 check for a data entry mismatch.</div>`
+    : '';
+  html+=`<div class="field"><label>Trigger Met (NRS \u22654 \u226530min post-T0 or recurrence)</label>
+      <select data-key="triggerMet"><option value=""></option><option value="Yes" ${rec.triggerMet==='Yes'?'selected':''}>Yes</option><option value="No" ${rec.triggerMet==='No'?'selected':''}>No</option></select></div>
+    <div class="field"><label>Trigger Time</label><div style="display:flex;gap:6px;"><input type="time" data-key="triggerTime" value="${rec.triggerTime||''}"><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div></div>
+    <div class="section-h">Rescue Doses (up to 3)</div>`;
+  const shown=Math.max(1, rec.rescues.filter(r=>r&&Object.keys(r).length).length, rec.rescues.length);
+  for(let i=0;i<Math.min(3,Math.max(1,shown));i++){
+    const r=rec.rescues[i]||{};
+    html+=`<div class="rescue-block">
+      <h4>Rescue #${i+1}</h4>
+      <div class="field"><label>Date/Time</label><div style="display:flex;gap:6px;"><input type="datetime-local" data-rescue="${i}" data-rf="dateTime" value="${r.dateTime||''}"><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div></div>
+      <div class="field"><label>Drug</label><select data-rescue="${i}" data-rf="drug"><option value=""></option>${RESCUE_DRUGS.map(d=>`<option ${r.drug===d?'selected':''}>${d}</option>`).join('')}</select></div>
+      <div class="field"><label>Dose</label><input type="text" data-rescue="${i}" data-rf="dose" value="${r.dose||''}"></div>
+      <div class="field"><label>Route</label><input type="text" data-rescue="${i}" data-rf="route" value="${r.route||''}"></div>
+      <div class="field"><label>Response (NRS after 30\u201345min)</label><input type="number" data-rescue="${i}" data-rf="responseNRS" value="${r.responseNRS||''}"></div>
+      <div class="field"><label>Notes</label><input type="text" data-rescue="${i}" data-rf="notes" value="${r.notes||''}"></div>
+    </div>`;
+  }
+  if(shown<3) html+=`<button class="btn" onclick="addRescue()">+ Add Another Rescue Dose</button>`;
+  return html;
+}
+function addRescue(){ const rec=getCurrentRecord(); rec.rescues.push({}); scheduleSave(rec); render(); }
+
+function attachRecordTabHandlers(rec){
+  const main=document.querySelector('main');
+  const interventionBody=document.getElementById('intervention-body');
+  if(interventionBody){ bindGenericFields(interventionBody, rec); }
+  main.querySelectorAll('[data-key]').forEach(el=>{
+    if(interventionBody && interventionBody.contains(el)) return; // already bound above
+    el.addEventListener(el.tagName==='SELECT'?'change':'input', ()=>{
+      rec[el.dataset.key]=el.value; scheduleSave(rec);
+      if(el.dataset.key==='triggerMet'){ updateStatusFromTrigger(rec); scheduleSave(rec); render(); }
+    });
+  });
+  main.querySelectorAll('[data-nrs]').forEach(el=>{
+    el.addEventListener('input',()=>{
+      const key=el.dataset.nrs;
+      rec.nrs[key]=el.value; scheduleSave(rec);
+      const val=+el.value;
+      const tp=UNIFIED_TIMEPOINTS.find(t=>t.nrsKey===key);
+      if(state.tab==='timeline' && tp && tp.min>30 && !isNaN(val) && el.value!=='' && val>=4){
+        if(rec.triggerMet!=='Yes'){
+          rec.triggerMet='Yes';
+          if(!rec.triggerTime) rec.triggerTime=new Date().toTimeString().slice(0,5);
+        }
+        updateStatusFromTrigger(rec);
+        scheduleSave(rec);
+        showToast('NRS \u22654 past 30min \u2014 opening Rescue');
+        state.tab='rescue'; render();
+      }
+    });
+  });
+  main.querySelectorAll('[data-vit]').forEach(el=>{
+    const range=RANGES[el.dataset.vf];
+    if(range) applyRangeCheck(el, range);
+    el.addEventListener('input',()=>{
+      const min=el.dataset.vit, f=el.dataset.vf;
+      rec.vitals[min]=rec.vitals[min]||{}; rec.vitals[min][f]=el.value; scheduleSave(rec);
+      if(range) applyRangeCheck(el, range);
+    });
+  });
+  main.querySelectorAll('[data-rescue]').forEach(el=>{
+    el.addEventListener(el.tagName==='SELECT'?'change':'input',()=>{
+      const i=+el.dataset.rescue, f=el.dataset.rf;
+      rec.rescues[i]=rec.rescues[i]||{}; rec.rescues[i][f]=el.value; scheduleSave(rec);
+    });
+  });
+  main.querySelectorAll('[data-fu]').forEach(el=>{
+    el.addEventListener(el.tagName==='SELECT'?'change':'input',()=>{
+      const p=el.dataset.fu, f=el.dataset.ff;
+      rec.followup[p]=rec.followup[p]||{}; rec.followup[p][f]=el.value; scheduleSave(rec);
+    });
+  });
+}
+
+/* ============================================================
+   SETTINGS & SYNC
+   ============================================================ */
+function renderSettings(){
+  const s=state.settings;
+  const notifSupported = 'Notification' in window;
+  const perm = notifSupported ? Notification.permission : 'unsupported';
+  return `<div class="settings-item">
+      <label>Apps Script Sync URL</label>
+      <input type="text" id="syncUrlInput" placeholder="https://script.google.com/macros/s/XXXX/exec" value="${s.syncUrl||''}">
+      <div class="hint">Paste the deployed Web App URL from your Google Apps Script CRF backend. Records queue locally and push here whenever you're online.</div>
+      <div style="margin-top:10px;"><button class="btn primary" onclick="saveSyncUrl()">Save URL</button></div>
+    </div>
+    <div class="settings-item">
+      <div class="hint">Last synced: ${s.lastSync? new Date(s.lastSync).toLocaleString() : 'Never'}</div>
+      <div style="margin-top:10px;"><button class="btn" onclick="syncAll()">Sync Now</button></div>
+    </div>
+    <div class="settings-item">
+      <label>Due-time Reminders</label>
+      <div class="hint">Notifies you when an NRS or vitals timepoint becomes due, while this app is open (foreground or a background tab). It cannot wake your phone if the app/browser is fully closed \u2014 that needs a push server, which this offline app doesn't have. Works best on Android; iOS Safari limits background tabs.</div>
+      <div style="margin-top:10px;">
+        ${!notifSupported ? '<div class="hint">Notifications are not supported in this browser.</div>'
+          : perm==='granted'
+            ? `<button class="btn ${s.remindersEnabled?'primary':''}" onclick="toggleReminders()">${s.remindersEnabled?'Reminders On \u2014 tap to turn off':'Turn Reminders On'}</button>`
+            : `<button class="btn primary" onclick="enableReminders()">Enable Reminders</button>`}
+      </div>
+    </div>
+    <div class="settings-item">
+      <label>Backup &amp; Restore</label>
+      <div class="hint">Everything lives only on this device. Back this up regularly (e.g. weekly) to a JSON file kept somewhere else \u2014 Excel export alone can't be re-imported if this phone is lost, reset, or the browser data is cleared.</div>
+      <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn primary" onclick="backupAllData()">Backup All Data</button>
+        <button class="btn" onclick="triggerRestoreFilePicker()">Restore from Backup</button>
+      </div>
+      <input type="file" id="restoreFileInput" accept="application/json" style="display:none" onchange="handleRestoreFile(this.files); this.value='';">
+    </div>
+    <div class="settings-item">
+      <label>Trash</label>
+      <div class="hint">Deleted records are kept for 7 days before being permanently removed, in case of an accidental delete.</div>
+      <div style="margin-top:10px;"><button class="btn" onclick="goTrash()">View Trash (${state.trash.length})</button></div>
+    </div>
+    <div class="settings-item">
+      <div class="hint">All data is stored on this device (IndexedDB) and works fully offline, including Excel export. Sync is optional and only needed to back your data up to the shared Google Sheet.</div>
+    </div>`;
+}
+function attachSettingsHandlers(){}
+async function backupAllData(){
+  const all=await dbGetAll('records');
+  const settings=await dbGet('settings','app');
+  const payload={ exportedAt:Date.now(), records:all, settings };
+  const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='scorpion_crf_backup_'+Date.now()+'.json'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1000);
+  showToast('Backup downloaded');
+}
+function triggerRestoreFilePicker(){ document.getElementById('restoreFileInput').click(); }
+function handleRestoreFile(fileList){
+  const file=(fileList||[])[0]; if(!file) return;
+  appConfirm('Restore from this backup? Records with matching Study IDs will be overwritten with the backup version.', async ()=>{
+    try{
+      const text=await file.text();
+      const payload=JSON.parse(text);
+      const records=payload.records || payload;
+      let count=0;
+      for(const rec of records){ if(rec && rec.id){ await dbPut('records', rec); count++; } }
+      if(payload.settings){ await dbPut('settings', payload.settings); }
+      await loadAll(); await loadSettings();
+      showToast('Restored '+count+' record(s)');
+    }catch(e){ showToast('Could not read backup file'); }
+  });
+}
+async function saveSyncUrl(){
+  state.settings.key='app';
+  state.settings.syncUrl=document.getElementById('syncUrlInput').value.trim();
+  await dbPut('settings',state.settings);
+  showToast('Sync URL saved');
+}
+
+async function enableReminders(){
+  if(!('Notification' in window)){ showToast('Notifications not supported in this browser'); return; }
+  const perm=await Notification.requestPermission();
+  if(perm!=='granted'){ showToast('Notification permission denied'); render(); return; }
+  state.settings.key='app'; state.settings.remindersEnabled=true;
+  await dbPut('settings',state.settings);
+  showToast('Reminders on \u2014 keep the app open to receive them');
+  render();
+}
+async function toggleReminders(){
+  state.settings.remindersEnabled=!state.settings.remindersEnabled;
+  await dbPut('settings',state.settings);
+  showToast(state.settings.remindersEnabled? 'Reminders on':'Reminders off');
+  render();
+}
+
+function fireReminderNotification(rec, msg){
+  const title='Scorpion CRF \u2014 '+rec.id;
+  const opts={ body:msg, tag:rec.id+'-'+msg, icon:'icon.svg' };
+  if(navigator.serviceWorker && navigator.serviceWorker.ready){
+    navigator.serviceWorker.ready.then(reg=>reg.showNotification(title, opts)).catch(()=>{ try{ new Notification(title, opts); }catch(e){} });
+  } else {
+    try{ new Notification(title, opts); }catch(e){}
+  }
+}
+
+async function checkReminders(){
+  if(!state.settings.remindersEnabled) return;
+  if(!('Notification' in window) || Notification.permission!=='granted') return;
+  for(const rec of state.records){
+    if(!rec.t0At) continue;
+    const nowMin=Math.round((Date.now()-new Date(rec.t0At).getTime())/60000);
+    rec.notified = rec.notified || {};
+    let changed=false;
+    UNIFIED_TIMEPOINTS.forEach(tp=>{
+      if(tp.nrsKey){
+        const key='nrs-'+tp.nrsKey;
+        const val=rec.nrs[tp.nrsKey];
+        const done = val!==undefined && val!=='';
+        if(!done && nowMin>=tp.min-1 && nowMin<=tp.min+15 && !rec.notified[key]){
+          fireReminderNotification(rec, 'NRS due at T+'+fmtTimeLabel(tp.min));
+          rec.notified[key]=true; changed=true;
+        }
+      }
+      if(tp.vitals){
+        const key='vit-'+tp.min;
+        const v=rec.vitals[tp.min];
+        const done = v && Object.keys(v).some(c=>v[c]);
+        if(!done && nowMin>=tp.min-1 && nowMin<=tp.min+15 && !rec.notified[key]){
+          fireReminderNotification(rec, 'Vitals due at T+'+fmtTimeLabel(tp.min));
+          rec.notified[key]=true; changed=true;
+        }
+      }
+      if(tp.followup){
+        const prefix=tp.min===720?'t12':'t24';
+        const key='fu-'+prefix;
+        const f=rec.followup[prefix];
+        const done = f && f.dateTime;
+        if(!done && nowMin>=tp.min-1 && nowMin<=tp.min+15 && !rec.notified[key]){
+          fireReminderNotification(rec, fmtTimeLabel(tp.min)+' follow-up call due');
+          rec.notified[key]=true; changed=true;
+        }
+      }
+    });
+    if(changed) await dbPut('records',rec);
+  }
+}
+
+async function syncAll(){
+  await loadSettings();
+  if(!state.settings.syncUrl){ showToast('Set a sync URL in Settings first'); return; }
+  if(!navigator.onLine){ showToast('You are offline \u2014 will sync when connected'); return; }
+  await loadAll();
+  let ok=0, fail=0;
+  for(const rec of state.records){
+    try{
+      const res=await fetch(state.settings.syncUrl,{ method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(rec) });
+      if(res.ok){ rec.synced=true; await dbPut('records',rec); ok++; } else fail++;
+    }catch(e){ fail++; }
+  }
+  state.settings.lastSync=Date.now();
+  await dbPut('settings',state.settings);
+  await loadAll();
+  showToast(`Synced ${ok} record(s)${fail?', '+fail+' failed':''}`);
+  render();
+}
+
+/* ============================================================
+   EXCEL EXPORT
+   ============================================================ */
+function downloadXlsx(sheets, filename){
+  const bytes=MiniXlsx.buildXlsx(sheets);
+  const blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1000);
+}
+function buildSheetsFor(records){
+  const flatCols=[];
+  WIZARD.forEach(s=>{ if(s.fields) s.fields.forEach(f=>flatCols.push(f.key)); });
+  INTERVENTION_FIELDS.forEach(f=>flatCols.push(f.key));
+  const recordsRows=[ ['StudyID', ...flatCols, ...INCLUSION.map(c=>'INC_'+c.key), ...EXCLUSION.map(c=>'EXC_'+c.key), 'OnsetReliefMin','TriggerMet','TriggerTime','Status','PrimaryEndpointMin','PrimaryEndpointSource','Missing_NRS_Timepoints','Missing_Vitals_Timepoints','PhotosAttached','Synced'] ];
+  const nrsRows=[['StudyID','Timepoint','NRS']];
+  const rescueRows=[['StudyID','RescueNum','DateTime','Drug','Dose','Route','ResponseNRS','Notes']];
+  const vitalsRows=[['StudyID','TimeMin','HR','SBP','DBP','RR','SpO2','Temp','AVPU','Notes']];
+  const fuRows=[['StudyID','Call','DateTime','NRS','RescueTakenAfterED','RescueDetails','AE_Revisit','AE_Details']];
+
+  records.forEach(r=>{
+    const pe=computePrimaryEndpoint(r);
+    const missingNrs=NRS_TIMEPOINTS.filter(tp=>r.nrs[tp.k]===undefined || r.nrs[tp.k]==='').map(tp=>'T+'+tp.k).join(', ');
+    const missingVitals=VITALS_TIMEPOINTS.filter(min=>{ const v=r.vitals[min]; return !v || !Object.keys(v).length; }).map(min=>min+'m').join(', ');
+    recordsRows.push([ r.id, ...flatCols.map(k=>r[k]??''), ...INCLUSION.map(c=>r.inclusion[c.key]?'Yes':'No'), ...EXCLUSION.map(c=>r.exclusion[c.key]?'Yes':'No'), r.onsetReliefMin??'', r.triggerMet??'', r.triggerTime??'', statusInfo(r).text, pe?pe.minutes:'', pe?pe.source:'', missingNrs, missingVitals, (r.photos||[]).length, r.synced?'Yes':'No' ]);
+    NRS_TIMEPOINTS.forEach(tp=>{ const v=r.nrs[tp.k]; if(v!==undefined && v!=='') nrsRows.push([r.id,'T+'+tp.k, +v]); });
+    (r.rescues||[]).forEach((rr,i)=>{ if(rr && Object.keys(rr).length) rescueRows.push([r.id, i+1, rr.dateTime||'', rr.drug||'', rr.dose||'', rr.route||'', rr.responseNRS??'', rr.notes||'']); });
+    VITALS_TIMEPOINTS.forEach(min=>{ const v=r.vitals[min]; if(v && Object.keys(v).length) vitalsRows.push([r.id, min, v.hr??'', v.sbp??'', v.dbp??'', v.rr??'', v.spo2??'', v.temp??'', v.avpu??'', v.notes??'']); });
+    ['t12','t24'].forEach(p=>{ const f=r.followup[p]; if(f && Object.keys(f).length){ const nrsKey=p==='t12'?'12h':'24h'; fuRows.push([r.id, p==='t12'?'T+12h':'T+24h', f.dateTime||'', r.nrs[nrsKey]??'', f.rescueTaken||'', f.rescueDetails||'', f.ae||'', f.aeDetails||'']); } });
+  });
+  return [
+    {name:'Records', rows:recordsRows},
+    {name:'NRS_Timepoints', rows:nrsRows},
+    {name:'Rescue_Analgesia', rows:rescueRows},
+    {name:'Vitals_Monitoring', rows:vitalsRows},
+    {name:'FollowUp_Calls', rows:fuRows},
+  ];
+}
+async function exportAll(){
+  await loadAll();
+  if(!state.records.length){ showToast('No records to export'); return; }
+  downloadXlsx(buildSheetsFor(state.records), 'scorpion_crf_all_'+Date.now()+'.xlsx');
+  showToast('Exported '+state.records.length+' record(s)');
+}
+async function exportOne(id){
+  const rec=state.records.find(r=>r.id===id);
+  downloadXlsx(buildSheetsFor([rec]), rec.id+'.xlsx');
+  showToast('Exported '+rec.id);
+}
+
+async function shareSummary(id){
+  const rec=state.records.find(r=>r.id===id);
+  const pe=computePrimaryEndpoint(rec);
+  const overdue=computeOverdueList(rec);
+  const lines=[
+    'Scorpion Sting CRF \u2014 '+rec.id,
+    'Age/Sex: '+(rec.age||'\u2014')+' / '+(rec.sex||'\u2014'),
+    'Sting site: '+(rec.stingSite||'\u2014')+(rec.side?(' ('+rec.side+')'):''),
+    'Technique: '+(rec.technique||'\u2014'),
+    'T0: '+(rec.t0At||'not recorded'),
+    'Baseline NRS: '+(rec.painNRS||'\u2014'),
+    'Trigger Met: '+(rec.triggerMet||'\u2014')+(rec.triggerTime?(' at '+rec.triggerTime):''),
+    'Primary Endpoint: '+(pe?('T+'+pe.minutes+'min \u2014 '+pe.source):'Not yet triggered'),
+    'Overdue now: '+(overdue.length?overdue.join(', '):'None'),
+    'Synced: '+(rec.synced?'Yes':'No'),
+  ];
+  const text=lines.join('\n');
+  if(navigator.share){
+    try{ await navigator.share({title:'CRF Summary '+rec.id, text}); return; }catch(e){ /* fall through */ }
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    try{ await navigator.clipboard.writeText(text); showToast('Summary copied to clipboard'); return; }catch(e){ /* fall through */ }
+  }
+  const blob=new Blob([text],{type:'text/plain'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=rec.id+'_summary.txt'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1000);
+  showToast('Summary saved as text file');
+}
+
+/* ============================================================
+   INIT
+   ============================================================ */
+window.addEventListener('online', render);
+window.addEventListener('offline', render);
+(async function init(){
+  await loadAll();
+  await loadSettings();
+  render();
+  if(navigator.onLine && state.settings.syncUrl){ syncAll(); }
+  checkReminders();
+  setInterval(checkReminders, 60000);
+})();
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+}
+</script>
+</body>
+</html>
