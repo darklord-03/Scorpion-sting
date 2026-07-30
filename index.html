@@ -59,6 +59,9 @@
   .badge{font-size:10px;font-family:var(--mono);padding:3px 7px;border-radius:99px;}
   .badge.synced{background:var(--ok-soft);color:var(--ok);}
   .badge.pending{background:var(--due-soft);color:var(--due);}
+  .badge.status-active{background:var(--teal-soft);color:var(--ink-2);}
+  .badge.status-rescue{background:var(--due-soft);color:var(--due);}
+  .badge.status-loss{background:#E4E4E2;color:#5B6A67;}
   .record-card .meta{font-size:12px;color:var(--text-dim);margin-top:4px;}
   .empty{text-align:center;color:var(--text-dim);padding:60px 20px;font-size:14px;}
 
@@ -373,6 +376,7 @@ const WIZARD = [
     {key:'qrs',label:'QRS (ms)',type:'number'},
     {key:'ecgComments',label:'ECG Comments',type:'text'},
   ]},
+  { id:'documents', title:'Attach Case Sheet / Consent Photos', custom:'documents' },
 ];
 
 const INTERVENTION_FIELDS=[
@@ -424,7 +428,7 @@ const EXCLUSION=[
 /* ============================================================
    APP STATE
    ============================================================ */
-const state={ view:'home', records:[], recordId:null, wizardStep:0, tab:'overview', settings:{}, vitalsModalMin:null };
+const state={ view:'home', records:[], trash:[], recordId:null, wizardStep:0, tab:'overview', settings:{}, vitalsModalMin:null, lossModalOpen:false, confirmModal:null };
 let saveTimer=null;
 
 function generateStudyId(){
@@ -437,8 +441,20 @@ function generateStudyId(){
 }
 function newRecordSkeleton(){
   const id=generateStudyId();
-  return { id, studyId:id, createdAt:Date.now(), updatedAt:Date.now(), synced:false,
-    inclusion:{}, exclusion:{}, nrs:{}, vitals:{}, rescues:[], followup:{t12:{},t24:{}} };
+  return { id, studyId:id, createdAt:Date.now(), updatedAt:Date.now(), synced:false, status:'active',
+    inclusion:{}, exclusion:{}, nrs:{}, vitals:{}, rescues:[], followup:{t12:{},t24:{}}, photos:[] };
+}
+function updateStatusFromTrigger(rec){
+  if(rec.status==='loss_to_followup') return;
+  rec.status = rec.triggerMet==='Yes' ? 'rescue_triggered' : 'active';
+}
+function monitoringLocked(rec){
+  return rec.status==='rescue_triggered' || rec.status==='loss_to_followup';
+}
+function statusInfo(rec){
+  if(rec.status==='rescue_triggered') return {text:'Rescue Triggered', cls:'status-rescue'};
+  if(rec.status==='loss_to_followup') return {text:'Loss to Follow-up', cls:'status-loss'};
+  return {text:'Active', cls:'status-active'};
 }
 
 function showToast(msg){
@@ -452,7 +468,21 @@ function scheduleSave(rec){
   saveTimer=setTimeout(()=>{ dbPut('records',rec); },400);
 }
 
-async function loadAll(){ state.records=(await dbGetAll('records')).sort((a,b)=>b.updatedAt-a.updatedAt); }
+async function loadAll(){
+  const all=await dbGetAll('records');
+  await purgeOldTrash(all);
+  state.records=all.filter(r=>!r.deletedAt).sort((a,b)=>b.updatedAt-a.updatedAt);
+  state.trash=all.filter(r=>r.deletedAt).sort((a,b)=>b.deletedAt-a.deletedAt);
+}
+async function purgeOldTrash(all){
+  const cutoff=Date.now()-7*24*60*60*1000;
+  const stale=all.filter(r=>r.deletedAt && r.deletedAt<cutoff);
+  for(const r of stale){ await dbDelete('records', r.id); }
+  if(stale.length){
+    const staleIds=new Set(stale.map(r=>r.id));
+    for(let i=all.length-1;i>=0;i--){ if(staleIds.has(all[i].id)) all.splice(i,1); }
+  }
+}
 async function loadSettings(){ state.settings=(await dbGet('settings','app'))||{key:'app',syncUrl:'',lastSync:null,remindersEnabled:false}; }
 
 /* ============================================================
@@ -467,10 +497,34 @@ async function render(){
   else if(state.view==='wizard') html+=renderWizard();
   else if(state.view==='record') html+=renderRecord();
   else if(state.view==='settings') html+=renderSettings();
+  else if(state.view==='trash') html+=renderTrash();
   html+='</main>';
   if(state.view==='home') html+='<button class="fab" onclick="startNewRecord()">+ New Enrollment</button>';
+  if(state.view==='record' && state.tab==='timeline') html+='<button class="fab" style="background:var(--due);" onclick="openLossModal()">Loss to F/U</button>';
+  if(state.confirmModal) html+=renderConfirmModal();
   app.innerHTML=html;
   attachHandlers();
+}
+function appConfirm(message, callback){ state.confirmModal={ message, callback }; render(); }
+function cancelAppConfirm(){ state.confirmModal=null; render(); }
+async function runAppConfirm(){
+  const cb=state.confirmModal && state.confirmModal.callback;
+  state.confirmModal=null;
+  if(cb) await cb();
+  render();
+}
+function renderConfirmModal(){
+  const m=state.confirmModal;
+  return `<div class="modal-overlay" onclick="if(event.target===this) cancelAppConfirm()">
+    <div class="modal-card">
+      <div class="modal-header"><div style="font-weight:700;font-size:16px;">Please Confirm</div></div>
+      <div class="modal-body"><div class="warn-banner">${m.message}</div></div>
+      <div class="modal-footer" style="display:flex;gap:10px;">
+        <button class="btn" style="flex:1;padding:14px;" onclick="cancelAppConfirm()">Cancel</button>
+        <button class="btn danger" style="flex:1;padding:14px;" onclick="runAppConfirm()">Confirm</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function renderTopbar(){
@@ -481,6 +535,7 @@ function renderTopbar(){
   if(state.view==='wizard') sub='New Enrollment';
   if(state.view==='record'){ const r=getCurrentRecord(); if(r) sub=r.id; }
   if(state.view==='settings') sub='Settings & Sync';
+  if(state.view==='trash') sub='Trash';
   return `<div class="topbar">
     <div style="display:flex;align-items:center;gap:6px;">${back}<div><h1>${title}</h1><div class="sub">${sub}</div></div></div>
     <div style="display:flex;align-items:center;gap:8px;">
@@ -528,11 +583,13 @@ function renderHome(){
     html+=`<input type="text" id="homeSearch" placeholder="Search by Study ID, technique, sync status..." oninput="filterHome()" style="margin-bottom:12px;">`;
     for(const r of state.records){
       const pct=recordCompleteness(r);
-      const searchBlob=`${r.id} ${r.technique||''} ${r.synced?'synced':'not synced pending'} ${r.sex||''}`.toLowerCase();
+      const si=statusInfo(r);
+      const searchBlob=`${r.id} ${r.technique||''} ${r.synced?'synced':'not synced pending'} ${r.sex||''} ${si.text}`.toLowerCase();
       html+=`<div class="record-card" data-search="${searchBlob}" onclick="openRecord('${r.id}')">
         <div class="row1">
           <span class="sid">${r.id}</span>
           <span style="display:flex;align-items:center;gap:8px;">
+            <span class="badge ${si.cls}">${si.text.toUpperCase()}</span>
             <span class="badge ${r.synced?'synced':'pending'}">${r.synced?'SYNCED':'NOT SYNCED'}</span>
             <button class="icon-btn" style="color:var(--due);font-size:16px;padding:2px 4px;" onclick="event.stopPropagation();deleteRecord('${r.id}')">\u2715</button>
           </span>
@@ -564,6 +621,7 @@ function openRecord(id){
   const rec=state.records.find(r=>r.id===id);
   state.tab=defaultTabFor(rec);
   state.vitalsModalMin=null;
+  state.lossModalOpen=false;
   render();
 }
 function filterHome(){
@@ -670,6 +728,8 @@ function renderWizard(){
     if(anyExc || !allInc){
       body=`<div class="warn-banner">${anyExc?'An exclusion criterion is checked \u2014 this participant is not eligible. Uncheck it to proceed, or exit and do not enroll.':'Not all inclusion criteria are confirmed yet.'}</div>`+body;
     }
+  } else if(step.custom==='documents'){
+    body = renderPhotosSection(rec, true);
   } else {
     body=step.fields.map(f=>fieldHTML(f,rec)).join('');
     if(step.warnIf){ const msg=step.warnIf(rec); body=`<div id="step-warn-slot">${msg?`<div class="warn-banner">${msg}</div>`:''}</div>`+body; }
@@ -732,6 +792,67 @@ function wizardNext(){ if(!validateStep()) return; state.wizardStep++; render();
 function wizardBack(){ state.wizardStep--; render(); }
 function wizardFinish(){ if(!validateStep()) return; showToast('Enrollment saved'); openRecord(state.recordId); }
 
+function renderPhotosSection(rec){
+  const photos = rec.photos || [];
+  const thumbs = photos.map(p=>`
+    <div style="position:relative;display:inline-block;margin:4px;">
+      <img src="${p.dataUrl}" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);">
+      <button type="button" class="icon-btn" style="position:absolute;top:-6px;right:-6px;background:var(--due);color:#fff;border-radius:99px;width:20px;height:20px;font-size:12px;line-height:20px;padding:0;" onclick="removePhoto('${p.id}')">\u2715</button>
+    </div>`).join('');
+  return `<div class="section-h">Case Sheet / Consent Photos</div>
+    <div class="hint" style="margin-bottom:10px;">Stored on this device only (not included in Excel export). Photograph the paper case sheet and signed consent form for your records.</div>
+    <input type="file" accept="image/*" capture="environment" multiple onchange="handlePhotoFiles(this.files); this.value='';" style="margin-bottom:10px;">
+    <div>${thumbs || '<div class="hint">No photos attached yet.</div>'}</div>`;
+}
+function resizeImageFile(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader=new FileReader();
+    reader.onerror=()=>reject(reader.error);
+    reader.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>reject(new Error('bad image'));
+      img.onload=()=>{
+        let {width,height}=img;
+        if(width>maxDim || height>maxDim){
+          if(width>height){ height=Math.round(height*maxDim/width); width=maxDim; }
+          else { width=Math.round(width*maxDim/height); height=maxDim; }
+        }
+        const canvas=document.createElement('canvas');
+        canvas.width=width; canvas.height=height;
+        canvas.getContext('2d').drawImage(img,0,0,width,height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src=reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+async function handlePhotoFiles(fileList){
+  const rec=getCurrentRecord(); if(!rec) return;
+  const files=Array.from(fileList||[]);
+  if(!files.length) return;
+  let added=0;
+  for(const file of files){
+    try{
+      const dataUrl=await resizeImageFile(file, 1400, 0.72);
+      rec.photos=rec.photos||[];
+      rec.photos.push({ id:'p'+Date.now()+Math.random().toString(36).slice(2,7), dataUrl, addedAt:Date.now(), name:file.name||'photo' });
+      added++;
+    }catch(e){ showToast('Could not read '+(file.name||'a photo')); }
+  }
+  await dbPut('records', rec);
+  if(added) showToast(added+' photo(s) added');
+  render();
+}
+function removePhoto(id){
+  const rec=getCurrentRecord(); if(!rec) return;
+  appConfirm('Remove this photo?', async ()=>{
+    rec.photos=(rec.photos||[]).filter(p=>p.id!==id);
+    await dbPut('records', rec);
+    showToast('Photo removed');
+  });
+}
+
 /* ============================================================
    RECORD DETAIL (post-enrollment tabs)
    ============================================================ */
@@ -746,7 +867,7 @@ function renderRecord(){
   else if(state.tab==='rescue') html+=renderRescueTab(rec);
   return html;
 }
-function setTab(id){ state.tab=id; state.vitalsModalMin=null; render(); }
+function setTab(id){ state.tab=id; state.vitalsModalMin=null; state.lossModalOpen=false; render(); }
 
 function computeOverdueList(rec){
   const t0=rec.t0At? new Date(rec.t0At).getTime() : null;
@@ -765,6 +886,12 @@ function computeOverdueList(rec){
 }
 
 function renderOverviewTab(rec){
+  const si=statusInfo(rec);
+  const statusHtml=`<div style="margin-bottom:12px;"><span class="badge ${si.cls}">${si.text.toUpperCase()}</span></div>`;
+  const lossHtml = (rec.status==='loss_to_followup' && rec.lossToFollowup)
+    ? `<div class="overview-row"><span class="k">Last Contact</span><span class="v">${rec.lossToFollowup.lastContact||'\u2014'}</span></div>
+       <div class="overview-row"><span class="k">Recontact Attempts</span><span class="v">${rec.lossToFollowup.attempts??'\u2014'}</span></div>`
+    : '';
   const pe=computePrimaryEndpoint(rec);
   const peHtml = pe
     ? `<div class="overview-row"><span class="k">Primary Endpoint (auto)</span><span class="v">T+${pe.minutes}min \u2014 ${pe.source}</span></div>`
@@ -788,15 +915,57 @@ function renderOverviewTab(rec){
       <button class="btn" onclick="shareSummary('${rec.id}')">Share Summary</button>
       <button class="btn danger" onclick="deleteRecord('${rec.id}')">Delete</button>
     </div>
+    ${statusHtml}
     ${overdueHtml}
     <div class="section-h">Computed</div>
     ${peHtml}
-    ${rows}`;
+    ${lossHtml}
+    ${rows}
+    ${renderPhotosSection(rec)}`;
 }
 function editEnrollment(){ state.view='wizard'; state.wizardStep=0; render(); }
-async function deleteRecord(id){
-  if(!confirm('Delete record '+id+'? This cannot be undone.')) return;
-  await dbDelete('records',id); await loadAll(); goHome();
+function deleteRecord(id){
+  appConfirm('Move '+id+' to Trash? It will be permanently deleted after 7 days unless restored.', async ()=>{
+    const rec=state.records.find(r=>r.id===id);
+    if(!rec) return;
+    rec.deletedAt=Date.now();
+    await dbPut('records', rec);
+    await loadAll();
+    showToast('Moved to Trash');
+    goHome();
+  });
+}
+async function restoreRecord(id){
+  const rec=state.trash.find(r=>r.id===id); if(!rec) return;
+  delete rec.deletedAt;
+  await dbPut('records', rec);
+  await loadAll();
+  showToast('Restored');
+  render();
+}
+function permanentlyDeleteRecord(id){
+  appConfirm('Permanently delete '+id+'? This cannot be undone.', async ()=>{
+    await dbDelete('records', id);
+    await loadAll();
+    showToast('Permanently deleted');
+  });
+}
+function goTrash(){ state.view='trash'; render(); }
+function renderTrash(){
+  if(!state.trash.length) return '<div class="empty">Trash is empty.</div>';
+  let html='<div class="hint" style="margin-bottom:12px;">Deleted records are kept for 7 days before being permanently removed.</div>';
+  state.trash.forEach(r=>{
+    const daysLeft=Math.max(0, 7-Math.floor((Date.now()-r.deletedAt)/(24*60*60*1000)));
+    html+=`<div class="record-card">
+      <div class="row1"><span class="sid">${r.id}</span><span class="hint">${daysLeft}d left</span></div>
+      <div class="meta">Deleted ${new Date(r.deletedAt).toLocaleString()}</div>
+      <div class="toolbar" style="margin-top:8px;margin-bottom:0;">
+        <button class="btn primary" onclick="restoreRecord('${r.id}')">Restore</button>
+        <button class="btn danger" onclick="permanentlyDeleteRecord('${r.id}')">Delete Permanently</button>
+      </div>
+    </div>`;
+  });
+  return html;
 }
 
 function renderInterventionTab(rec){
@@ -818,7 +987,22 @@ function renderInterventionTab(rec){
   return `<div style="margin-bottom:12px;">${badge}</div>
     <div id="intervention-body">${INTERVENTION_FIELDS.map(f=>fieldHTML(f,rec)).join('')}</div>
     <div class="section-h">Vitals at T+0 (feeds the Monitoring timeline)</div>
-    ${t0vitalsHtml}`;
+    ${t0vitalsHtml}
+    <div class="wizard-nav">
+      <button class="btn ghost" onclick="saveAndExit()">Save &amp; Exit</button>
+      <button class="btn primary" onclick="setTab('timeline')">Proceed to Monitoring</button>
+    </div>`;
+}
+async function saveAndExit(){
+  const rec=getCurrentRecord();
+  if(rec) await flushSave(rec);
+  showToast('Saved');
+  goHome();
+}
+function flushSave(rec){
+  clearTimeout(saveTimer);
+  rec.updatedAt=Date.now();
+  return dbPut('records', rec);
 }
 
 function renderTimelineTab(rec){
@@ -826,9 +1010,14 @@ function renderTimelineTab(rec){
   const nowMin = t0? Math.round((Date.now()-t0)/60000) : null;
   const vcols=['hr','sbp','dbp','rr','spo2','temp','avpu','notes'];
   const elapsed=elapsedSinceT0(rec);
+  const locked=monitoringLocked(rec);
+  const si=statusInfo(rec);
   const t0Badge=t0
     ? `<span class="badge synced">Elapsed since T0: ${elapsed}</span>`
     : `<span class="badge pending">T0 not recorded yet \u2014 enter it on the Intervention tab to unlock clock times</span>`;
+  const lockedBanner = locked
+    ? `<div class="warn-banner">Monitoring stopped \u2014 status: ${si.text}. Entries below are locked.</div>`
+    : '';
 
   let rows='';
   let lastVitalsMin=null;
@@ -845,14 +1034,15 @@ function renderTimelineTab(rec){
     const clockTime = t0 ? new Date(t0+tp.min*60000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
 
     const nrsCell = tp.nrsKey
-      ? `<td><input type="number" min="0" max="10" style="width:44px" data-nrs="${tp.nrsKey}" value="${nrsVal}"></td>`
+      ? `<td><input type="number" min="0" max="10" style="width:44px" data-nrs="${tp.nrsKey}" value="${nrsVal}" ${locked?'disabled':''}></td>`
       : `<td>\u2014</td>`;
     const isFutureVitals = tp.vitals && (nowMin===null || (tp.min - nowMin > 15));
-    const copyBtn = (tp.vitals && !isFutureVitals && lastVitalsMin!==null)
+    const vitalsDisabled = isFutureVitals || locked;
+    const copyBtn = (tp.vitals && !isFutureVitals && !locked && lastVitalsMin!==null)
       ? `<button type="button" class="btn ghost" style="padding:2px 5px;font-size:10px;margin-top:2px;" onclick="copyPreviousVitals(${lastVitalsMin},${tp.min})" title="Copy previous vitals row">\u21ba copy prev</button>`
       : '';
     const vitalCell = tp.vitals
-      ? `<td><button type="button" class="vitals-entry-btn" ${isFutureVitals?'disabled title="Not due yet"':''} onclick="openVitalsModal(${tp.min})">${vitalsSummary(v) || (isFutureVitals?'Not due yet':'Tap to enter')}</button></td>`
+      ? `<td><button type="button" class="vitals-entry-btn" ${vitalsDisabled?'disabled title="Not due yet, or monitoring stopped"':''} onclick="openVitalsModal(${tp.min})">${vitalsSummary(v) || (vitalsDisabled?'\u2014':'Tap to enter')}</button></td>`
       : `<td>\u2014</td>`;
     if(tp.vitals) lastVitalsMin=tp.min;
 
@@ -864,22 +1054,24 @@ function renderTimelineTab(rec){
       rows+=`<tr class="${cls}"><td colspan="3" style="padding:8px 4px;">
         <div class="rescue-block" style="margin:2px 0;">
           <h4>${fmtTimeLabel(tp.min)} Follow-up Call${clockTime?' \u2014 due ~'+clockTime:''}</h4>
-          <div class="field"><label>Call Date/Time</label><div style="display:flex;gap:6px;"><input type="datetime-local" data-fu="${prefix}" data-ff="dateTime" value="${f.dateTime||''}"><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div></div>
-          <div class="field"><label>Rescue Taken After ED?</label><select data-fu="${prefix}" data-ff="rescueTaken"><option value=""></option><option ${f.rescueTaken==='Yes'?'selected':''}>Yes</option><option ${f.rescueTaken==='No'?'selected':''}>No</option></select></div>
-          <div class="field"><label>Rescue Details</label><input type="text" data-fu="${prefix}" data-ff="rescueDetails" value="${f.rescueDetails||''}"></div>
-          <div class="field"><label>Any AE / Revisit?</label><select data-fu="${prefix}" data-ff="ae"><option value=""></option><option ${f.ae==='Yes'?'selected':''}>Yes</option><option ${f.ae==='No'?'selected':''}>No</option></select></div>
-          <div class="field"><label>AE Details</label><input type="text" data-fu="${prefix}" data-ff="aeDetails" value="${f.aeDetails||''}"></div>
+          <div class="field"><label>Call Date/Time</label><div style="display:flex;gap:6px;"><input type="datetime-local" data-fu="${prefix}" data-ff="dateTime" value="${f.dateTime||''}" ${locked?'disabled':''}><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)" ${locked?'disabled':''}>Now</button></div></div>
+          <div class="field"><label>Rescue Taken After ED?</label><select data-fu="${prefix}" data-ff="rescueTaken" ${locked?'disabled':''}><option value=""></option><option ${f.rescueTaken==='Yes'?'selected':''}>Yes</option><option ${f.rescueTaken==='No'?'selected':''}>No</option></select></div>
+          <div class="field"><label>Rescue Details</label><input type="text" data-fu="${prefix}" data-ff="rescueDetails" value="${f.rescueDetails||''}" ${locked?'disabled':''}></div>
+          <div class="field"><label>Any AE / Revisit?</label><select data-fu="${prefix}" data-ff="ae" ${locked?'disabled':''}><option value=""></option><option ${f.ae==='Yes'?'selected':''}>Yes</option><option ${f.ae==='No'?'selected':''}>No</option></select></div>
+          <div class="field"><label>AE Details</label><input type="text" data-fu="${prefix}" data-ff="aeDetails" value="${f.aeDetails||''}" ${locked?'disabled':''}></div>
         </div>
       </td></tr>`;
     }
   });
 
-  return `<div style="margin-bottom:12px;">${t0Badge}</div>
+  return `<div style="margin-bottom:12px;">${t0Badge} <span class="badge ${si.cls}">${si.text.toUpperCase()}</span></div>
+    ${lockedBanner}
     <div class="field"><label>Onset of significant relief (min after T0, NRS \u22643)</label>
-      <input type="number" data-key="onsetReliefMin" value="${rec.onsetReliefMin||''}"></div>
+      <input type="number" data-key="onsetReliefMin" value="${rec.onsetReliefMin||''}" ${locked?'disabled':''}></div>
     <div class="section-h">Timeline \u2014 NRS + Vitals; amber = due soon, red = overdue; vitals lock until their time arrives; tap Vitals to enter; times below update from your Intervention T0; 12h/24h rows include the follow-up call</div>
     <div class="tbl-wrap"><table class="grid-table"><tr><th>Time</th><th>NRS</th><th>Vitals</th></tr>${rows}</table></div>
-    ${state.vitalsModalMin!==null ? renderVitalsModal(rec, state.vitalsModalMin) : ''}`;
+    ${state.vitalsModalMin!==null ? renderVitalsModal(rec, state.vitalsModalMin) : ''}
+    ${state.lossModalOpen ? renderLossModal(rec) : ''}`;
 }
 function vitalsSummary(v){
   if(!v || !Object.keys(v).length) return '';
@@ -941,6 +1133,40 @@ function copyPreviousVitals(fromMin, toMin){
   scheduleSave(rec); render();
   showToast('Copied vitals from T+'+fmtTimeLabel(+fromMin));
 }
+function openLossModal(){ state.lossModalOpen=true; render(); }
+function closeLossModal(){ state.lossModalOpen=false; render(); }
+function renderLossModal(rec){
+  return `<div class="modal-overlay" onclick="if(event.target===this) closeLossModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div style="font-weight:700;font-size:16px;">Mark as Loss to Follow-up</div>
+        <button class="icon-btn" style="color:var(--ink);font-size:22px;" onclick="closeLossModal()">\u2715</button>
+      </div>
+      <div class="modal-body">
+        <div class="warn-banner">This stops further monitoring for this patient and should only be used when recontact has genuinely failed. This action is hard to reverse cleanly \u2014 you'll get one more confirmation before it saves.</div>
+        <div class="field"><label>Time of Last Contact</label><div style="display:flex;gap:6px;"><input type="datetime-local" id="lossLastContact"><button type="button" class="btn ghost" style="padding:8px 10px;white-space:nowrap;" onclick="setNowSibling(this)">Now</button></div></div>
+        <div class="field"><label>Number of Attempts to Recontact</label><input type="number" id="lossAttempts" min="0"></div>
+      </div>
+      <div class="modal-footer" style="display:flex;gap:10px;">
+        <button class="btn" style="flex:1;padding:14px;" onclick="closeLossModal()">Cancel</button>
+        <button class="btn danger" style="flex:1;padding:14px;" onclick="confirmLossToFollowup()">Confirm</button>
+      </div>
+    </div>
+  </div>`;
+}
+function confirmLossToFollowup(){
+  const rec=getCurrentRecord(); if(!rec) return;
+  const lastContact=document.getElementById('lossLastContact').value;
+  const attempts=document.getElementById('lossAttempts').value;
+  if(!lastContact){ showToast('Enter time of last contact'); return; }
+  appConfirm('Mark '+rec.id+' as Loss to Follow-up? Further monitoring will be locked.', async ()=>{
+    rec.lossToFollowup={ lastContact, attempts, recordedAt:Date.now() };
+    rec.status='loss_to_followup';
+    await dbPut('records', rec);
+    state.lossModalOpen=false;
+    showToast('Marked as Loss to Follow-up');
+  });
+}
 
 function renderRescueTab(rec){
   const hasRescueData=(rec.rescues||[]).some(r=>r && (r.dateTime||r.drug||r.dose));
@@ -976,7 +1202,10 @@ function attachRecordTabHandlers(rec){
   if(interventionBody){ bindGenericFields(interventionBody, rec); }
   main.querySelectorAll('[data-key]').forEach(el=>{
     if(interventionBody && interventionBody.contains(el)) return; // already bound above
-    el.addEventListener('input',()=>{ rec[el.dataset.key]=el.value; scheduleSave(rec); });
+    el.addEventListener(el.tagName==='SELECT'?'change':'input', ()=>{
+      rec[el.dataset.key]=el.value; scheduleSave(rec);
+      if(el.dataset.key==='triggerMet'){ updateStatusFromTrigger(rec); scheduleSave(rec); render(); }
+    });
   });
   main.querySelectorAll('[data-nrs]').forEach(el=>{
     el.addEventListener('input',()=>{
@@ -989,6 +1218,7 @@ function attachRecordTabHandlers(rec){
           rec.triggerMet='Yes';
           if(!rec.triggerTime) rec.triggerTime=new Date().toTimeString().slice(0,5);
         }
+        updateStatusFromTrigger(rec);
         scheduleSave(rec);
         showToast('NRS \u22654 past 30min \u2014 opening Rescue');
         state.tab='rescue'; render();
@@ -1046,10 +1276,50 @@ function renderSettings(){
       </div>
     </div>
     <div class="settings-item">
+      <label>Backup &amp; Restore</label>
+      <div class="hint">Everything lives only on this device. Back this up regularly (e.g. weekly) to a JSON file kept somewhere else \u2014 Excel export alone can't be re-imported if this phone is lost, reset, or the browser data is cleared.</div>
+      <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn primary" onclick="backupAllData()">Backup All Data</button>
+        <button class="btn" onclick="triggerRestoreFilePicker()">Restore from Backup</button>
+      </div>
+      <input type="file" id="restoreFileInput" accept="application/json" style="display:none" onchange="handleRestoreFile(this.files); this.value='';">
+    </div>
+    <div class="settings-item">
+      <label>Trash</label>
+      <div class="hint">Deleted records are kept for 7 days before being permanently removed, in case of an accidental delete.</div>
+      <div style="margin-top:10px;"><button class="btn" onclick="goTrash()">View Trash (${state.trash.length})</button></div>
+    </div>
+    <div class="settings-item">
       <div class="hint">All data is stored on this device (IndexedDB) and works fully offline, including Excel export. Sync is optional and only needed to back your data up to the shared Google Sheet.</div>
     </div>`;
 }
 function attachSettingsHandlers(){}
+async function backupAllData(){
+  const all=await dbGetAll('records');
+  const settings=await dbGet('settings','app');
+  const payload={ exportedAt:Date.now(), records:all, settings };
+  const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download='scorpion_crf_backup_'+Date.now()+'.json'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },1000);
+  showToast('Backup downloaded');
+}
+function triggerRestoreFilePicker(){ document.getElementById('restoreFileInput').click(); }
+function handleRestoreFile(fileList){
+  const file=(fileList||[])[0]; if(!file) return;
+  appConfirm('Restore from this backup? Records with matching Study IDs will be overwritten with the backup version.', async ()=>{
+    try{
+      const text=await file.text();
+      const payload=JSON.parse(text);
+      const records=payload.records || payload;
+      let count=0;
+      for(const rec of records){ if(rec && rec.id){ await dbPut('records', rec); count++; } }
+      if(payload.settings){ await dbPut('settings', payload.settings); }
+      await loadAll(); await loadSettings();
+      showToast('Restored '+count+' record(s)');
+    }catch(e){ showToast('Could not read backup file'); }
+  });
+}
 async function saveSyncUrl(){
   state.settings.key='app';
   state.settings.syncUrl=document.getElementById('syncUrlInput').value.trim();
@@ -1158,7 +1428,7 @@ function buildSheetsFor(records){
   const flatCols=[];
   WIZARD.forEach(s=>{ if(s.fields) s.fields.forEach(f=>flatCols.push(f.key)); });
   INTERVENTION_FIELDS.forEach(f=>flatCols.push(f.key));
-  const recordsRows=[ ['StudyID', ...flatCols, ...INCLUSION.map(c=>'INC_'+c.key), ...EXCLUSION.map(c=>'EXC_'+c.key), 'OnsetReliefMin','TriggerMet','TriggerTime','PrimaryEndpointMin','PrimaryEndpointSource','Missing_NRS_Timepoints','Missing_Vitals_Timepoints','Synced'] ];
+  const recordsRows=[ ['StudyID', ...flatCols, ...INCLUSION.map(c=>'INC_'+c.key), ...EXCLUSION.map(c=>'EXC_'+c.key), 'OnsetReliefMin','TriggerMet','TriggerTime','Status','PrimaryEndpointMin','PrimaryEndpointSource','Missing_NRS_Timepoints','Missing_Vitals_Timepoints','PhotosAttached','Synced'] ];
   const nrsRows=[['StudyID','Timepoint','NRS']];
   const rescueRows=[['StudyID','RescueNum','DateTime','Drug','Dose','Route','ResponseNRS','Notes']];
   const vitalsRows=[['StudyID','TimeMin','HR','SBP','DBP','RR','SpO2','Temp','AVPU','Notes']];
@@ -1168,7 +1438,7 @@ function buildSheetsFor(records){
     const pe=computePrimaryEndpoint(r);
     const missingNrs=NRS_TIMEPOINTS.filter(tp=>r.nrs[tp.k]===undefined || r.nrs[tp.k]==='').map(tp=>'T+'+tp.k).join(', ');
     const missingVitals=VITALS_TIMEPOINTS.filter(min=>{ const v=r.vitals[min]; return !v || !Object.keys(v).length; }).map(min=>min+'m').join(', ');
-    recordsRows.push([ r.id, ...flatCols.map(k=>r[k]??''), ...INCLUSION.map(c=>r.inclusion[c.key]?'Yes':'No'), ...EXCLUSION.map(c=>r.exclusion[c.key]?'Yes':'No'), r.onsetReliefMin??'', r.triggerMet??'', r.triggerTime??'', pe?pe.minutes:'', pe?pe.source:'', missingNrs, missingVitals, r.synced?'Yes':'No' ]);
+    recordsRows.push([ r.id, ...flatCols.map(k=>r[k]??''), ...INCLUSION.map(c=>r.inclusion[c.key]?'Yes':'No'), ...EXCLUSION.map(c=>r.exclusion[c.key]?'Yes':'No'), r.onsetReliefMin??'', r.triggerMet??'', r.triggerTime??'', statusInfo(r).text, pe?pe.minutes:'', pe?pe.source:'', missingNrs, missingVitals, (r.photos||[]).length, r.synced?'Yes':'No' ]);
     NRS_TIMEPOINTS.forEach(tp=>{ const v=r.nrs[tp.k]; if(v!==undefined && v!=='') nrsRows.push([r.id,'T+'+tp.k, +v]); });
     (r.rescues||[]).forEach((rr,i)=>{ if(rr && Object.keys(rr).length) rescueRows.push([r.id, i+1, rr.dateTime||'', rr.drug||'', rr.dose||'', rr.route||'', rr.responseNRS??'', rr.notes||'']); });
     VITALS_TIMEPOINTS.forEach(min=>{ const v=r.vitals[min]; if(v && Object.keys(v).length) vitalsRows.push([r.id, min, v.hr??'', v.sbp??'', v.dbp??'', v.rr??'', v.spo2??'', v.temp??'', v.avpu??'', v.notes??'']); });
